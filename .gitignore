@@ -1,0 +1,14 @@
+# VS Code files for those working on multiple tools
+**/.vscode/*
+*.code-workspace
+
+
+*.exe
+LogFile.txt
+
+*.obj
+
+*.spv
+
+# whitelist
+# !shaders/**
