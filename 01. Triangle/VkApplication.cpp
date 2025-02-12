@@ -1789,7 +1789,7 @@ namespace VkApplication
     // Manually reset the fence to the unsignaled state.
         vkResetFences( vulkanLogicalDevice, 1, &inFlightFence);
 
-    // Acquiring and image from the swap chain.
+    // Acquiring an image from the swap chain.
         uint32_t imageIndex;
         vkAcquireNextImageKHR( vulkanLogicalDevice, vulkanSwapChain, UINT64_MAX /* timeout in nanoseconds for an image to become available (disable timeout here)*/, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
 

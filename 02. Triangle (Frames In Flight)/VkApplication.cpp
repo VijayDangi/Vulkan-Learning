@@ -77,6 +77,9 @@ namespace VkApplication
     const bool enableValidationLayers = false;
 #endif
 
+    const int MAX_FRAMES_IN_FLIGHT = 2; // Defines how many frames should be processed concurrently.
+    uint32_t currentFrame = 0;  // Track of the current frame.
+
     // Vulkan Specific Variables
     VkInstance vulkanInstance;
     VkDebugUtilsMessengerEXT vulkanDebugMessenger;
@@ -102,12 +105,12 @@ namespace VkApplication
     std::vector<VkFramebuffer> vulkanSwapchainFramebuffers;
 
     VkCommandPool vulkanCommandPool;
-    VkCommandBuffer vulkanCommandBuffer;    // Command buffers will be automatically freed when their command pool is destroyed, so we don't need explicit clenup.
+    VkCommandBuffer vulkanCommandBuffers[MAX_FRAMES_IN_FLIGHT];    // Command buffers will be automatically freed when their command pool is destroyed, so we don't need explicit clenup.
 
     // Synchromization Objects
-    VkSemaphore imageAvailableSemaphore;    // To signal that an image has been aquired from the swapchain and is ready for rendering.
-    VkSemaphore renderFinishedSemaphore;    // To signal that rendering has finished and presentation can happen.
-    VkFence inFlightFence;                  // To make sure only one frame is rendering at a time.
+    VkSemaphore imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT];    // To signal that an image has been aquired from the swapchain and is ready for rendering.
+    VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT];    // To signal that rendering has finished and presentation can happen.
+    VkFence inFlightFences[MAX_FRAMES_IN_FLIGHT];                  // To make sure only one frame is rendering at a time.
 
     /**
      * @brief LogSwapChainSupportDetails()
@@ -1537,9 +1540,9 @@ namespace VkApplication
     }
 
     /**
-     * @brief CreateVulkanCommandBuffer()
+     * @brief CreateVulkanCommandBuffers()
      */
-    static bool CreateVulkanCommandBuffer()
+    static bool CreateVulkanCommandBuffers()
     {
         // code
         VkCommandBufferAllocateInfo allocateInfo{};
@@ -1549,9 +1552,9 @@ namespace VkApplication
         // VK_COMMAND_BUFFER_LEVEL_PRIMARY : Can be submitted to a queue for execution, but cannot be called from other command buffers.
         // VK_COMMAND_BUFFER_LEVEL_SECONDARY : Cannot be submitted directly, but can be called from primary command buffers.
         allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocateInfo.commandBufferCount = 1;
+        allocateInfo.commandBufferCount = MAX_FRAMES_IN_FLIGHT;
 
-        VkResult errorCode = vkAllocateCommandBuffers( vulkanLogicalDevice, &allocateInfo, &vulkanCommandBuffer);
+        VkResult errorCode = vkAllocateCommandBuffers( vulkanLogicalDevice, &allocateInfo, vulkanCommandBuffers);
         if(errorCode)
         {
             LogError("Vulkan: [Error] vkAllocateCommandBuffers() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
@@ -1577,25 +1580,30 @@ namespace VkApplication
             // immediately since the fence is already signaled.
         fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-        VkResult errorCode = vkCreateSemaphore(vulkanLogicalDevice, &semaphoreCreateInfo, nullptr, &imageAvailableSemaphore);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkCreateSemaphore() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
+        VkResult errorCode;
 
-        errorCode = vkCreateSemaphore(vulkanLogicalDevice, &semaphoreCreateInfo, nullptr, &renderFinishedSemaphore);
-        if(errorCode)
+        for( uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
-            LogError("Vulkan: [Error] vkCreateSemaphore() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
+            errorCode = vkCreateSemaphore(vulkanLogicalDevice, &semaphoreCreateInfo, nullptr, &imageAvailableSemaphores[i]);
+            if(errorCode)
+            {
+                LogError("Vulkan: [Error] vkCreateSemaphore() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+                return false;
+            }
 
-        errorCode = vkCreateFence(vulkanLogicalDevice, &fenceCreateInfo, nullptr, &inFlightFence);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkCreateFence() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
+            errorCode = vkCreateSemaphore(vulkanLogicalDevice, &semaphoreCreateInfo, nullptr, &renderFinishedSemaphores[i]);
+            if(errorCode)
+            {
+                LogError("Vulkan: [Error] vkCreateSemaphore() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+                return false;
+            }
+
+            errorCode = vkCreateFence(vulkanLogicalDevice, &fenceCreateInfo, nullptr, &inFlightFences[i]);
+            if(errorCode)
+            {
+                LogError("Vulkan: [Error] vkCreateFence() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+                return false;
+            }
         }
         
         return true;
@@ -1678,8 +1686,8 @@ namespace VkApplication
             return false;
         }
 
-        // 12. Create Command Buffer
-        if(!CreateVulkanCommandBuffer())
+        // 12. Create Command Buffers
+        if(!CreateVulkanCommandBuffers())
         {
             return false;
         }
@@ -1784,39 +1792,39 @@ namespace VkApplication
     void DrawFrame()
     {
     // Waiting for the previous frame.
-        vkWaitForFences( vulkanLogicalDevice, 1, &inFlightFence, VK_TRUE /* Wait for all fences */, UINT64_MAX /* Timeout */);
+        vkWaitForFences( vulkanLogicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE /* Wait for all fences */, UINT64_MAX /* Timeout */);
 
     // Manually reset the fence to the unsignaled state.
-        vkResetFences( vulkanLogicalDevice, 1, &inFlightFence);
+        vkResetFences( vulkanLogicalDevice, 1, &inFlightFences[currentFrame]);
 
     // Acquiring and image from the swap chain.
         uint32_t imageIndex;
-        vkAcquireNextImageKHR( vulkanLogicalDevice, vulkanSwapChain, UINT64_MAX /* timeout in nanoseconds for an image to become available (disable timeout here)*/, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+        vkAcquireNextImageKHR( vulkanLogicalDevice, vulkanSwapChain, UINT64_MAX /* timeout in nanoseconds for an image to become available (disable timeout here)*/, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
 
     // Recording the command buffer
-        vkResetCommandBuffer( vulkanCommandBuffer, 0);  // Make sure it is able to be recorded.
+        vkResetCommandBuffer( vulkanCommandBuffers[currentFrame], 0);  // Make sure it is able to be recorded.
 
-        RecordCommandBuffer(vulkanCommandBuffer, imageIndex);
+        RecordCommandBuffer(vulkanCommandBuffers[currentFrame], imageIndex);
 
     //  Submitting the command buffer
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-        VkSemaphore waitSemaphores[] = { imageAvailableSemaphore};
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &vulkanCommandBuffers[currentFrame];  // Command Buffers to actually submit for execution.
+
+        VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
         VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
         submitInfo.waitSemaphoreCount = 1;
         submitInfo.pWaitSemaphores = waitSemaphores;    // Specify which semaphores to wait on before execution begins.
         submitInfo.pWaitDstStageMask = waitStages;      // In which stage(s) of the pipeline to wait.
             // Each entry in the 'waitStage' array corresponds to the semaphore with the same index in 'pWaitSemaphores'
         
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &vulkanCommandBuffer;  // Command Buffers to actually submit for execution.
-
-        VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
+        VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;    // Specify which semaphores to signal once the command buffer(s) have finished execution.
 
-        VkResult errorCode = vkQueueSubmit( vulkanGraphicsQueue, 1, &submitInfo, inFlightFence);
+        VkResult errorCode = vkQueueSubmit( vulkanGraphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]);
         if(errorCode)
         {
             LogError("Vulkan: [Error] vkQueueSubmit() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
@@ -1837,6 +1845,10 @@ namespace VkApplication
         presentInfo.pResults = nullptr;
 
         vkQueuePresentKHR(vulkanPresentationQueue, &presentInfo);
+
+        // we render current frame and it sends to GPU for process,
+        // instead of waiting for GPU to finish, we start rendering next frame.
+        currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     /**
@@ -1851,22 +1863,25 @@ namespace VkApplication
             vkDeviceWaitIdle(vulkanLogicalDevice);
         }
 
-        if(imageAvailableSemaphore)
+        for(uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
-            vkDestroySemaphore(vulkanLogicalDevice, imageAvailableSemaphore, nullptr);
-            imageAvailableSemaphore = nullptr;
-        }
+            if(imageAvailableSemaphores[i])
+            {
+                vkDestroySemaphore(vulkanLogicalDevice, imageAvailableSemaphores[i], nullptr);
+                imageAvailableSemaphores[i] = nullptr;
+            }
 
-        if(renderFinishedSemaphore)
-        {
-            vkDestroySemaphore(vulkanLogicalDevice, renderFinishedSemaphore, nullptr);
-            renderFinishedSemaphore = nullptr;
-        }
+            if(renderFinishedSemaphores[i])
+            {
+                vkDestroySemaphore(vulkanLogicalDevice, renderFinishedSemaphores[i], nullptr);
+                renderFinishedSemaphores[i] = nullptr;
+            }
 
-        if(inFlightFence)
-        {
-            vkDestroyFence(vulkanLogicalDevice, inFlightFence, nullptr);
-            inFlightFence = nullptr;
+            if(inFlightFences[i])
+            {
+                vkDestroyFence(vulkanLogicalDevice, inFlightFences[i], nullptr);
+                inFlightFences[i] = nullptr;
+            }
         }
         
         if(vulkanCommandPool)
