@@ -50,7 +50,6 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInsatnce, LPSTR szCmdLin
     //variable declarations
     WNDCLASSEX wndclass;
     HWND  hwnd;
-    MSG   msg;
     TCHAR szClassName[] = TEXT("Vulkan Triangle");
 
     //code
@@ -122,7 +121,7 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInsatnce, LPSTR szCmdLin
 
     UnregisterClass( szClassName, hInstance);
 
-    return( (int)msg.wParam);
+    return(EXIT_SUCCESS);
 }
 
 // PollWindowEvent()
