@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <vector>
+#include <array>
 #include <set>
 #include <cstdint>
 #include <limits>       // std::numeric_limits
@@ -13,6 +14,8 @@
 #include <string>
 #include <cstring>
 #include <fstream>
+
+#include "../Common/glm/glm.hpp"
 
 #include "Common.h"
 #include "VkApplication.h"
@@ -54,6 +57,47 @@ namespace VkApplication
         VkSurfaceCapabilitiesKHR capabilities;
         std::vector<VkSurfaceFormatKHR> formats;
         std::vector<VkPresentModeKHR> presentModes;
+    };
+
+    struct Vertex
+    {
+        glm::vec2 position;
+        glm::vec3 color;
+
+        static VkVertexInputBindingDescription getBindingDescription()
+        {
+            // code
+            // Vertex binding describes at which rate to load data from memory throughout the vertices.
+            // It specifies the number of bytes between data entries and whether to move to the next data after
+            // each vertex or after each instance.
+            VkVertexInputBindingDescription bindingDescription{};
+
+            bindingDescription.binding = 0;                                 // Specifies the index of the binding in the array of bindings.
+            bindingDescription.stride = sizeof(Vertex);                     // Specifies the number of bytes from one entry to the next.
+            bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;     // PerVertex Or PerInstance.
+
+            return bindingDescription;
+        }
+
+        static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions()
+        {
+            // code
+            std::array<VkVertexInputAttributeDescription, 2> attributeDescription{};
+
+            // position
+            attributeDescription[0].binding = 0;
+            attributeDescription[0].location = 0;   // Shader Input Location Attribute.
+            attributeDescription[0].format = VK_FORMAT_R32G32_SFLOAT;
+            attributeDescription[0].offset = offsetof(Vertex, position);
+
+            // color
+            attributeDescription[1].binding = 0;
+            attributeDescription[1].location = 1;   // Shader Input Location Attribute.
+            attributeDescription[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attributeDescription[1].offset = offsetof(Vertex, color);
+
+            return attributeDescription;
+        }
     };
 
     // Variable Declaration
@@ -113,6 +157,16 @@ namespace VkApplication
     VkFence inFlightFences[MAX_FRAMES_IN_FLIGHT];                  // To make sure only one frame is rendering at a time.
 
     bool framebufferResized = false;
+
+    // Vertex Buffer
+    VkBuffer vulkanVertexBuffer;
+    VkDeviceMemory vulkanVertexBufferMemory;
+
+    const std::vector<Vertex> vertices = {
+      {{ 0.0f, -0.5f}, { 1.0f, 0.0f, 0.0f}},
+      {{ 0.5f,  0.5f}, { 0.0f, 1.0f, 0.0f}},
+      {{-0.5f,  0.5f}, { 0.0f, 0.0f, 1.0f}}
+    };
 
     /**
      * @brief LogSwapChainSupportDetails()
@@ -1277,11 +1331,16 @@ namespace VkApplication
 
 ////////////// Vertex Input
         VkPipelineVertexInputStateCreateInfo vertexInputCreateInfo{};
+
+        VkVertexInputBindingDescription bindingDescription = Vertex::getBindingDescription();
+        std::array<VkVertexInputAttributeDescription, 2> attributeDescription = Vertex::getAttributeDescriptions();
+
         vertexInputCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInputCreateInfo.vertexBindingDescriptionCount = 0;
-        vertexInputCreateInfo.pVertexBindingDescriptions = nullptr;
-        vertexInputCreateInfo.vertexAttributeDescriptionCount = 0;
-        vertexInputCreateInfo.pVertexAttributeDescriptions = nullptr;
+        vertexInputCreateInfo.vertexBindingDescriptionCount = 1;
+        vertexInputCreateInfo.pVertexBindingDescriptions = &bindingDescription;
+
+        vertexInputCreateInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescription.size());
+        vertexInputCreateInfo.pVertexAttributeDescriptions = attributeDescription.data();
 
 ////////////// Input Assembly
         VkPipelineInputAssemblyStateCreateInfo inputAssemblyCreateInfo{};
@@ -1612,10 +1671,106 @@ namespace VkApplication
     }
 
     /**
+     * @brief FindVulkanMemoryType()
+     */
+    static uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
+    {
+        // code
+        // Get available types of memory.
+        VkPhysicalDeviceMemoryProperties memProperties{};
+        vkGetPhysicalDeviceMemoryProperties(vulkanPhysicalDevice, &memProperties);
+
+        for(uint32_t i = 0; i < memProperties.memoryTypeCount; ++i)
+        {
+            if( (typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
+            {
+                return i;
+            }
+        }
+
+        LogError("Failed To Find Suitable memory type.");
+        return -1;
+    }
+
+    /**
+     * @brief CreateVertexBuffer()
+     */
+    static bool CreateVertexBuffer()
+    {
+        // code
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(vertices[0]) * vertices.size();    // sizeof of buffer
+        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;       // Purpose of buffer (can specify multiple purposes).
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;         // Buffer can be owned by specific queue family or be shared between multiple at the same time.
+                                                                    // For now specify as owned by specific queue family.
+
+        VkResult errorCode = vkCreateBuffer( vulkanLogicalDevice, &bufferInfo, nullptr, &vulkanVertexBuffer);
+        if(errorCode != VK_SUCCESS)
+        {
+            LogError("Vulkan: [Error] vkCreateBuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+            return false;
+        }
+
+        // Memory Requirement
+        VkMemoryRequirements memRequirements;
+        vkGetBufferMemoryRequirements(vulkanLogicalDevice, vulkanVertexBuffer, &memRequirements);
+
+        // Memory Allocation
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memRequirements.size;
+        uint32_t memoryType = FindMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if(memoryType == -1)
+        {
+            LogError("FindMemoryType() Failed.");
+            return false;
+        }
+        allocInfo.memoryTypeIndex = memoryType;
+
+        errorCode = vkAllocateMemory( vulkanLogicalDevice, &allocInfo, nullptr, &vulkanVertexBufferMemory);
+        if(errorCode != VK_SUCCESS)
+        {
+            LogError("Vulkan: [Error] vkAllocateBuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+            return false;
+        }
+
+        // Associate Memory with buffer
+        vkBindBufferMemory( vulkanLogicalDevice, vulkanVertexBuffer, vulkanVertexBufferMemory, 0);
+
+        // Filling The Vertex Buffer
+            // Map buffer memory into CPU accessible memory
+        void *data = nullptr;
+        errorCode = vkMapMemory(vulkanLogicalDevice, vulkanVertexBufferMemory, 0, bufferInfo.size, 0, &data);
+        if(errorCode != VK_SUCCESS)
+        {
+            LogError("Vulkan: [Error] vkMapMemory() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+            return false;
+        }
+            // Copy Data To memory
+        memcpy(data, vertices.data(), (size_t)bufferInfo.size);
+
+            // Unmap Memory
+        vkUnmapMemory(vulkanLogicalDevice, vulkanVertexBufferMemory);
+        data = nullptr;
+
+        LogSuccess("Vulkan: [Success] Create Vertex Buffer and Memory allocated.");
+        return true;
+    }
+    
+
+    /**
      * @brief Initialize()
      */
     bool Initialize(HWND hwnd)
     {
+#define CHECK_FUNCTION_RETURN(x) \
+        if(!(x))    \
+        {   \
+            LogError(#x " Failed.");    \
+            return false;   \
+        }
+
         // code
         VkResult vulkanErrorCode;
         
@@ -1623,84 +1778,50 @@ namespace VkApplication
         GetVulkanSupportedInstanceExtensions();
         
         // 1. Create Vulkan Instace
-        if(!CreateVulkanInstance())
-        {
-            return false;
-        }
+        CHECK_FUNCTION_RETURN(CreateVulkanInstance());
 
         // 2. Setup Validation Layer
-        if(!SetupVulkanDebugMessenger())
-        {
-            return false;
-        }
+        CHECK_FUNCTION_RETURN(SetupVulkanDebugMessenger());
 
         // 3. Create Surface
-        if(!CreateVulkanSurface(hwnd))
-        {
-            return false;
-        }
+        CHECK_FUNCTION_RETURN(CreateVulkanSurface(hwnd));
 
         // 4. Select Physical Device
-        if(!PickVulkanPhysicalDevice())
-        {
-            return false;
-        }
+        CHECK_FUNCTION_RETURN(PickVulkanPhysicalDevice());
 
         // 5. Setup Logical Device
-        if(!CreateVulkanLogicalDevice())
-        {
-            return false;
-        }
+        CHECK_FUNCTION_RETURN(CreateVulkanLogicalDevice());
 
         // 6. Create Swap Chain
-        if(!CreateVulkanSwapChain())
-        {
-            return false;
-        }
+        CHECK_FUNCTION_RETURN(CreateVulkanSwapChain());
 
         // 7. Create Image Views of SwapChain images
-        if(!CreateVulkanImageViewsForSwapchain())
-        {
-            return false;
-        }
+        CHECK_FUNCTION_RETURN(CreateVulkanImageViewsForSwapchain());
 
         // 8. Create Render Pass
-        if(!CreateVulkanRenderPass())
-        {
-            return false;
-        }
+        CHECK_FUNCTION_RETURN(CreateVulkanRenderPass());
 
         // 9. Create Grpahics Pipeline
-        if(!CreateVulkanGraphicsPipeline())
-        {
-            return false;
-        }
+        CHECK_FUNCTION_RETURN(CreateVulkanGraphicsPipeline());
 
         // 10. Create Swapchain Framebuffer
-        if(!CreateVulkanFramebuffersForSwapchain())
-        {
-            return false;
-        }
+        CHECK_FUNCTION_RETURN(CreateVulkanFramebuffersForSwapchain());
 
         // 11. Create Vulkan Command Pool
-        if(!CreateVulkanCommandPool())
-        {
-            return false;
-        }
+        CHECK_FUNCTION_RETURN(CreateVulkanCommandPool());
 
-        // 12. Create Command Buffers
-        if(!CreateVulkanCommandBuffers())
-        {
-            return false;
-        }
+        // 12. Create Vertex Buffer
+        CHECK_FUNCTION_RETURN(CreateVertexBuffer());
 
-        // 13. Create Sync Objects
-        if(!CreateVulkanSyncObjects())
-        {
-            return false;
-        }
+        // 13. Create Command Buffers
+        CHECK_FUNCTION_RETURN(CreateVulkanCommandBuffers());
+
+        // 14. Create Sync Objects
+        CHECK_FUNCTION_RETURN(CreateVulkanSyncObjects());
 
         return true;
+
+#undef CHECK_FUNCTION_RETURN
     }
 
     /**
@@ -1842,8 +1963,13 @@ namespace VkApplication
         scissor.extent = vulkanSwapChainExtent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+        // Bind Vertex Buffer
+        VkBuffer vertexBuffers[] = {vulkanVertexBuffer};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+
         // Draw Command For Triangle
-        vkCmdDraw( commandBuffer, /* vertexCount */ 3, /* instanceCount */ 1, /* firstVertex */ 0, /* firstInstance */ 0);
+        vkCmdDraw( commandBuffer, /* vertexCount */ static_cast<uint32_t>(vertices.size()), /* instanceCount */ 1, /* firstVertex */ 0, /* firstInstance */ 0);
 
 ////////////// Finishing Up
         // The render pass can now be ended.
@@ -1966,6 +2092,18 @@ namespace VkApplication
         }
 
         CleanupSwapChain();
+
+        if(vulkanVertexBuffer)
+        {
+            vkDestroyBuffer(vulkanLogicalDevice, vulkanVertexBuffer, nullptr);
+            vulkanVertexBuffer = nullptr;
+        }
+
+        if(vulkanVertexBufferMemory)
+        {
+            vkFreeMemory(vulkanLogicalDevice, vulkanVertexBufferMemory, nullptr);
+            vulkanVertexBufferMemory = nullptr;
+        }
 
         for(uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
