@@ -132,7 +132,7 @@ namespace VkApplication
     VkSurfaceKHR vulkanSurface;
     VkSwapchainKHR vulkanSwapChain;
 
-    VkQueue vulkanGraphicsQueue;    // Devices queue are implicitly cleaned up when device is destroyed.
+    VkQueue vulkanGraphicsQueue;        // Devices queue are implicitly cleaned up when device is destroyed.
     VkQueue vulkanPresentationQueue;    // Devices queue are implicitly cleaned up when device is destroyed.
 
     std::vector<VkImage> vulkanSwapChainImages; // The images were created by the implementation for the swap chain and they
@@ -148,7 +148,8 @@ namespace VkApplication
 
     std::vector<VkFramebuffer> vulkanSwapchainFramebuffers;
 
-    VkCommandPool vulkanCommandPool;
+    VkCommandPool vulkanGraphicsCommandPool;
+    VkCommandPool vulkanTransferCommandPool;
     VkCommandBuffer vulkanCommandBuffers[MAX_FRAMES_IN_FLIGHT];    // Command buffers will be automatically freed when their command pool is destroyed, so we don't need explicit clenup.
 
     // Synchromization Objects
@@ -1569,15 +1570,13 @@ namespace VkApplication
     }
 
     /**
-     * @brief CreateVulkanCommandPool()
+     * @brief CreatevulkanGraphicsCommandPool()
      */
-    static bool CreateVulkanCommandPool()
+    static bool CreatevulkanGraphicsCommandPool(VkCommandPoolCreateFlags poolCreateFlag, uint32_t queueFamilyIndex, VkCommandPool &out_commandPool)
     {
         // code
             // Command pools manages the memory that is used to store the buffers and command buffers
             // are allocated from them.
-        QueueFamilyIndices queueFamilyIndices = FindQueueFamilies(vulkanPhysicalDevice);
-
         VkCommandPoolCreateInfo commandPoolCreateInfo{};
         commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         //
@@ -1585,17 +1584,17 @@ namespace VkApplication
         //  VK_COMMAND_POOL_CREATE_REST_COMMAND_BUFFER_BIT : Allow command buffers to be rerecorded individually, without this flag they all have to be reset together.
         //  VK_COMMAND_POOL_CREATE_PROTECTED_BIT  : Specifies that command buffers allocated from the pool are protected command buffers.
         //
-        commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;  // we will be recording a command buffer every frame, so we want to be able to reset and rerecord over it.
-        commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily;     // We're going to record commands for drawing, which is why we've chosen the graphics queue family.
+        commandPoolCreateInfo.flags = poolCreateFlag;
+        commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
 
-        VkResult errorCode = vkCreateCommandPool(vulkanLogicalDevice, &commandPoolCreateInfo, nullptr, &vulkanCommandPool);
+        VkResult errorCode = vkCreateCommandPool(vulkanLogicalDevice, &commandPoolCreateInfo, nullptr, &out_commandPool);
         if(errorCode)
         {
             LogError("Vulkan: [Error] vkCreateCommandPool() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
             return false;
         }
 
-        LogSuccess("Vulkan: [Success] Vulkan Graphics Family Command Pool Created.");
+        LogSuccess("Vulkan: [Success] Vulkan Command Pool Created for QueueFamilyIndex: %u.", queueFamilyIndex);
 
         return true;
     }
@@ -1603,12 +1602,12 @@ namespace VkApplication
     /**
      * @brief CreateVulkanCommandBuffers()
      */
-    static bool CreateVulkanCommandBuffers()
+    static bool CreateVulkanCommandBuffers(VkCommandPool commandPool)
     {
         // code
         VkCommandBufferAllocateInfo allocateInfo{};
         allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocateInfo.commandPool = vulkanCommandPool;
+        allocateInfo.commandPool = commandPool;
 
         // VK_COMMAND_BUFFER_LEVEL_PRIMARY : Can be submitted to a queue for execution, but cannot be called from other command buffers.
         // VK_COMMAND_BUFFER_LEVEL_SECONDARY : Cannot be submitted directly, but can be called from primary command buffers.
@@ -1692,20 +1691,17 @@ namespace VkApplication
         return -1;
     }
 
-    /**
-     * @brief CreateVertexBuffer()
-     */
-    static bool CreateVertexBuffer()
+    static bool CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
     {
         // code
         VkBufferCreateInfo bufferInfo{};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(vertices[0]) * vertices.size();    // sizeof of buffer
-        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;       // Purpose of buffer (can specify multiple purposes).
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;         // Buffer can be owned by specific queue family or be shared between multiple at the same time.
-                                                                    // For now specify as owned by specific queue family.
+        bufferInfo.size = size;         // Sizeof of buffer.
+        bufferInfo.usage = usage;       // Purpose of buffer (can specify multiple purposes).
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        VkResult errorCode = vkCreateBuffer( vulkanLogicalDevice, &bufferInfo, nullptr, &vulkanVertexBuffer);
+
+        VkResult errorCode = vkCreateBuffer( vulkanLogicalDevice, &bufferInfo, nullptr, &buffer);
         if(errorCode != VK_SUCCESS)
         {
             LogError("Vulkan: [Error] vkCreateBuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
@@ -1714,13 +1710,13 @@ namespace VkApplication
 
         // Memory Requirement
         VkMemoryRequirements memRequirements;
-        vkGetBufferMemoryRequirements(vulkanLogicalDevice, vulkanVertexBuffer, &memRequirements);
+        vkGetBufferMemoryRequirements(vulkanLogicalDevice, buffer, &memRequirements);
 
         // Memory Allocation
         VkMemoryAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         allocInfo.allocationSize = memRequirements.size;
-        uint32_t memoryType = FindMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        uint32_t memoryType = FindMemoryType(memRequirements.memoryTypeBits, memoryProperties);
         if(memoryType == -1)
         {
             LogError("FindMemoryType() Failed.");
@@ -1728,7 +1724,7 @@ namespace VkApplication
         }
         allocInfo.memoryTypeIndex = memoryType;
 
-        errorCode = vkAllocateMemory( vulkanLogicalDevice, &allocInfo, nullptr, &vulkanVertexBufferMemory);
+        errorCode = vkAllocateMemory( vulkanLogicalDevice, &allocInfo, nullptr, &bufferMemory);
         if(errorCode != VK_SUCCESS)
         {
             LogError("Vulkan: [Error] vkAllocateBuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
@@ -1736,23 +1732,104 @@ namespace VkApplication
         }
 
         // Associate Memory with buffer
-        vkBindBufferMemory( vulkanLogicalDevice, vulkanVertexBuffer, vulkanVertexBufferMemory, 0);
+        vkBindBufferMemory( vulkanLogicalDevice, buffer, bufferMemory, 0);
 
-        // Filling The Vertex Buffer
-            // Map buffer memory into CPU accessible memory
-        void *data = nullptr;
-        errorCode = vkMapMemory(vulkanLogicalDevice, vulkanVertexBufferMemory, 0, bufferInfo.size, 0, &data);
-        if(errorCode != VK_SUCCESS)
+        return true;
+    }
+
+    static void CopyBuffer(VkBuffer sourceBuffer, VkBuffer destinationBuffer, VkDeviceSize size)
+    {
+        // code
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandPool = vulkanTransferCommandPool;
+        allocInfo.commandBufferCount = 1;
+
+        VkCommandBuffer commandBuffer;
+        vkAllocateCommandBuffers(vulkanLogicalDevice, &allocInfo, &commandBuffer);
+
+        // Start Recording Command
+            // We're only going to use the command buffer once and wait with returning from the function until
+            // the copy operation has finished executing. It's good practice to tell the driver about our intent
+            // using 'VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT'.
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        // Copy Command
+            // Contents of buffers are transferred using the 'vkCmdCopyBuffer()' command. It takes the source and destination
+            // buffers as arguments, and an array of regions to copy.
+        VkBufferCopy copyRegion{};
+        copyRegion.srcOffset = 0;
+        copyRegion.dstOffset = 0;
+        copyRegion.size = size;
+
+        vkCmdCopyBuffer( commandBuffer, sourceBuffer, destinationBuffer, 1, &copyRegion);
+
+        // End Recording Command
+        vkEndCommandBuffer(commandBuffer);
+
+        // Execute commands
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+            // The buffer copy command requires a queue family that supports transfer operations. The good news is that any
+            // queue family with 'VK_QUEUE_GRAPHICS_BIT' or 'VK_QUEUE_COMPUTE_BIT' capabilities already implicitly supports
+            // 'VK_QUEUE_TRANSFER_BIT'.
+        vkQueueSubmit(vulkanGraphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+
+            // Unlike the draw commands, there are no events we need to wait on this time. We just want to execute
+            // the transfer on the buffers immediately.
+            // There are again two possible ways to wait on this transfer to complete. We could use a fence and wait with
+            // 'vkWaitForFences()', or simply wait for the transfer queue to become idle with 'vkQueueWaitIdle()'.
+        vkQueueWaitIdle(vulkanGraphicsQueue);
+
+        vkFreeCommandBuffers(vulkanLogicalDevice, vulkanTransferCommandPool, 1, &commandBuffer);
+        commandBuffer = nullptr;
+    }
+
+    /**
+     * @brief CreateVertexBuffer()
+     */
+    static bool CreateVertexBuffer()
+    {
+        // code
+        VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+
+        VkBuffer staginBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, staginBuffer, stagingBufferMemory))
         {
-            LogError("Vulkan: [Error] vkMapMemory() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+            LogError("[Error] CreateBuffer() Failed.");
             return false;
         }
-            // Copy Data To memory
-        memcpy(data, vertices.data(), (size_t)bufferInfo.size);
 
-            // Unmap Memory
-        vkUnmapMemory(vulkanLogicalDevice, vulkanVertexBufferMemory);
+            // Map buffer memory into CPU accessible memory
+        void *data = nullptr;
+        vkMapMemory(vulkanLogicalDevice, stagingBufferMemory, 0, bufferSize, 0, &data);
+            memcpy(data, vertices.data(), (size_t)bufferSize);
+        vkUnmapMemory(vulkanLogicalDevice, stagingBufferMemory);
         data = nullptr;
+
+        if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanVertexBuffer, vulkanVertexBufferMemory))
+        {
+            LogError("[Error] CreateBuffer() Failed.");
+            return false;
+        }
+
+        // copy data from staging buffer to vertex buffer
+        CopyBuffer(staginBuffer, vulkanVertexBuffer, bufferSize);
+
+        vkDestroyBuffer( vulkanLogicalDevice, staginBuffer, nullptr);
+        staginBuffer = nullptr;
+
+        vkFreeMemory(vulkanLogicalDevice, stagingBufferMemory, nullptr);
+        stagingBufferMemory = nullptr;
 
         LogSuccess("Vulkan: [Success] Create Vertex Buffer and Memory allocated.");
         return true;
@@ -1808,13 +1885,19 @@ namespace VkApplication
         CHECK_FUNCTION_RETURN(CreateVulkanFramebuffersForSwapchain());
 
         // 11. Create Vulkan Command Pool
-        CHECK_FUNCTION_RETURN(CreateVulkanCommandPool());
+        QueueFamilyIndices queueFamilyIndices = FindQueueFamilies(vulkanPhysicalDevice);
+            // we will be recording a command buffer every frame, so we want to be able to reset and rerecord over it.
+            // We're going to record commands for drawing, which is why we've chosen the graphics queue family.
+        CHECK_FUNCTION_RETURN(CreatevulkanGraphicsCommandPool(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, queueFamilyIndices.graphicsFamily, vulkanGraphicsCommandPool));
+
+            // Apply memory allocation optimizations, for that use VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
+        CHECK_FUNCTION_RETURN(CreatevulkanGraphicsCommandPool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, queueFamilyIndices.graphicsFamily, vulkanTransferCommandPool));
 
         // 12. Create Vertex Buffer
         CHECK_FUNCTION_RETURN(CreateVertexBuffer());
 
         // 13. Create Command Buffers
-        CHECK_FUNCTION_RETURN(CreateVulkanCommandBuffers());
+        CHECK_FUNCTION_RETURN(CreateVulkanCommandBuffers(vulkanGraphicsCommandPool));
 
         // 14. Create Sync Objects
         CHECK_FUNCTION_RETURN(CreateVulkanSyncObjects());
@@ -2125,11 +2208,27 @@ namespace VkApplication
                 inFlightFences[i] = nullptr;
             }
         }
-        
-        if(vulkanCommandPool)
+
+        if(vulkanCommandBuffers[0])
         {
-            vkDestroyCommandPool(vulkanLogicalDevice, vulkanCommandPool, nullptr);
-            vulkanCommandPool = nullptr;
+            vkFreeCommandBuffers(vulkanLogicalDevice, vulkanGraphicsCommandPool, MAX_FRAMES_IN_FLIGHT, vulkanCommandBuffers);
+
+            for( uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+            {
+                vulkanCommandBuffers[i] = nullptr;
+            }
+        }
+        
+        if(vulkanGraphicsCommandPool)
+        {
+            vkDestroyCommandPool(vulkanLogicalDevice, vulkanGraphicsCommandPool, nullptr);
+            vulkanGraphicsCommandPool = nullptr;
+        }
+
+        if(vulkanTransferCommandPool)
+        {
+            vkDestroyCommandPool(vulkanLogicalDevice, vulkanTransferCommandPool, nullptr);
+            vulkanTransferCommandPool = nullptr;
         }
 
         if(vulkanGraphicsPipeline)
