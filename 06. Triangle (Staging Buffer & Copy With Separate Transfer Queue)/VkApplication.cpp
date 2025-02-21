@@ -43,12 +43,14 @@ namespace VkApplication
     {
         uint32_t graphicsFamily = INVALID_QUEUE_FAMILY_HANDLE;
         uint32_t presentFamily = INVALID_QUEUE_FAMILY_HANDLE;       // Queue-specific feature which is Presenting to the Surface.
+        uint32_t transferFamily = INVALID_QUEUE_FAMILY_HANDLE;
 
         bool IsComplete()
         {
             // code
             return graphicsFamily != INVALID_QUEUE_FAMILY_HANDLE &&
-                   presentFamily != INVALID_QUEUE_FAMILY_HANDLE;
+                   presentFamily != INVALID_QUEUE_FAMILY_HANDLE &&
+                   transferFamily != INVALID_QUEUE_FAMILY_HANDLE;
         }
     };
 
@@ -134,6 +136,7 @@ namespace VkApplication
 
     VkQueue vulkanGraphicsQueue;        // Devices queue are implicitly cleaned up when device is destroyed.
     VkQueue vulkanPresentationQueue;    // Devices queue are implicitly cleaned up when device is destroyed.
+    VkQueue vulkanTransferQueue;        // Devices queue are implicitly cleaned up when device is destroyed.
 
     std::vector<VkImage> vulkanSwapChainImages; // The images were created by the implementation for the swap chain and they
                                                 // will be automatically cleaned up once the swap chain has been destroyed.
@@ -604,6 +607,12 @@ namespace VkApplication
                 queueIndices.graphicsFamily = i;
             }
 
+            if(!(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+               (queueFamily.queueFlags & VK_QUEUE_TRANSFER_BIT))
+            {
+                queueIndices.transferFamily = i;
+            }
+
             // Check if device support surface presentation.
             VkBool32 presentSupport = false;
             vkGetPhysicalDeviceSurfaceSupportKHR(device, i, vulkanSurface, &presentSupport);
@@ -614,6 +623,9 @@ namespace VkApplication
 
             if(queueIndices.IsComplete())
             {
+                LogInfo("Graphics Queue Family Index: %u", queueIndices.graphicsFamily);
+                LogInfo("Present Queue Family Index: %u", queueIndices.presentFamily);
+                LogInfo("Transfer Queue Family Index: %u", queueIndices.transferFamily);
                 break;
             }
 
@@ -857,7 +869,7 @@ namespace VkApplication
 #else
         // VkDeviceQueueCreateInfo.queueFamilyIndex must be unique
         std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-        std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily, indices.presentFamily};
+        std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily, indices.presentFamily, indices.transferFamily};
 
         float queuePriority = 1.0f;
         for(uint32_t queueFamily : uniqueQueueFamilies)
@@ -906,6 +918,7 @@ namespace VkApplication
         ///////////////// Retrieving Queue Handles
         vkGetDeviceQueue(vulkanLogicalDevice, indices.graphicsFamily, 0, &vulkanGraphicsQueue);
         vkGetDeviceQueue(vulkanLogicalDevice, indices.presentFamily, 0, &vulkanPresentationQueue);
+        vkGetDeviceQueue(vulkanLogicalDevice, indices.transferFamily, 0, &vulkanTransferQueue);
 
         LogSuccess("Vulkan: [Success] Vulkan Device And Queue Create Successfully.");
 
@@ -1698,8 +1711,12 @@ namespace VkApplication
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = size;         // Sizeof of buffer.
         bufferInfo.usage = usage;       // Purpose of buffer (can specify multiple purposes).
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        bufferInfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
 
+        QueueFamilyIndices indices = FindQueueFamilies(vulkanPhysicalDevice);
+        uint32_t queueFamiliesIndices[] = { indices.graphicsFamily, indices.transferFamily};
+        bufferInfo.queueFamilyIndexCount = 2;
+        bufferInfo.pQueueFamilyIndices = queueFamiliesIndices;
 
         VkResult errorCode = vkCreateBuffer( vulkanLogicalDevice, &bufferInfo, nullptr, &buffer);
         if(errorCode != VK_SUCCESS)
@@ -1778,16 +1795,13 @@ namespace VkApplication
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffer;
 
-            // The buffer copy command requires a queue family that supports transfer operations. The good news is that any
-            // queue family with 'VK_QUEUE_GRAPHICS_BIT' or 'VK_QUEUE_COMPUTE_BIT' capabilities already implicitly supports
-            // 'VK_QUEUE_TRANSFER_BIT'.
-        vkQueueSubmit(vulkanGraphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueSubmit(vulkanTransferQueue, 1, &submitInfo, VK_NULL_HANDLE);
 
             // Unlike the draw commands, there are no events we need to wait on this time. We just want to execute
             // the transfer on the buffers immediately.
             // There are again two possible ways to wait on this transfer to complete. We could use a fence and wait with
             // 'vkWaitForFences()', or simply wait for the transfer queue to become idle with 'vkQueueWaitIdle()'.
-        vkQueueWaitIdle(vulkanGraphicsQueue);
+        vkQueueWaitIdle(vulkanTransferQueue);
 
         vkFreeCommandBuffers(vulkanLogicalDevice, vulkanTransferCommandPool, 1, &commandBuffer);
         commandBuffer = nullptr;
@@ -1891,7 +1905,7 @@ namespace VkApplication
         CHECK_FUNCTION_RETURN(CreatevulkanGraphicsCommandPool(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, queueFamilyIndices.graphicsFamily, vulkanGraphicsCommandPool));
 
             // Apply memory allocation optimizations, for that use VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
-        CHECK_FUNCTION_RETURN(CreatevulkanGraphicsCommandPool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, queueFamilyIndices.graphicsFamily, vulkanTransferCommandPool));
+        CHECK_FUNCTION_RETURN(CreatevulkanGraphicsCommandPool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, queueFamilyIndices.transferFamily, vulkanTransferCommandPool));
 
         // 12. Create Vertex Buffer
         CHECK_FUNCTION_RETURN(CreateVertexBuffer());
