@@ -48,7 +48,7 @@ namespace VkApplication
         {
             // code
             return graphicsFamily != INVALID_QUEUE_FAMILY_HANDLE &&
-                   graphicsFamily != INVALID_QUEUE_FAMILY_HANDLE;
+                   presentFamily != INVALID_QUEUE_FAMILY_HANDLE;
         }
     };
 
