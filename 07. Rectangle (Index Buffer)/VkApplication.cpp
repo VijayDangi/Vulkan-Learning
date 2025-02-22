@@ -166,11 +166,19 @@ namespace VkApplication
     VkBuffer vulkanVertexBuffer;
     VkDeviceMemory vulkanVertexBufferMemory;
 
-    const std::vector<Vertex> vertices = {
-      {{ 0.0f, -0.5f}, { 1.0f, 0.0f, 0.0f}},
-      {{ 0.5f,  0.5f}, { 0.0f, 1.0f, 0.0f}},
-      {{-0.5f,  0.5f}, { 0.0f, 0.0f, 1.0f}}
+    // Index Buffer
+    VkBuffer vulkanIndexBuffer;
+    VkDeviceMemory vulkanIndexBufferMemory;
+
+    const std::vector<Vertex> vertices =
+    {
+      {{ -0.5f, -0.5f}, { 1.0f, 0.0f, 0.0f}},
+      {{  0.5f, -0.5f}, { 0.0f, 1.0f, 0.0f}},
+      {{  0.5f,  0.5f}, { 0.0f, 0.0f, 1.0f}},
+      {{ -0.5f,  0.5f}, { 1.0f, 1.0f, 1.0f}}
     };
+
+    const std::vector<uint16_t> indices = { 0, 1, 2, 2, 3, 0 };
 
     /**
      * @brief LogSwapChainSupportDetails()
@@ -1704,6 +1712,9 @@ namespace VkApplication
         return -1;
     }
 
+    /**
+     * @brief CreateBuffer()
+     */
     static bool CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
     {
         // code
@@ -1754,6 +1765,9 @@ namespace VkApplication
         return true;
     }
 
+    /**
+     * @brief CopyBuffer()
+     */
     static void CopyBuffer(VkBuffer sourceBuffer, VkBuffer destinationBuffer, VkDeviceSize size)
     {
         // code
@@ -1815,9 +1829,9 @@ namespace VkApplication
         // code
         VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
 
-        VkBuffer staginBuffer;
+        VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
-        if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, staginBuffer, stagingBufferMemory))
+        if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory))
         {
             LogError("[Error] CreateBuffer() Failed.");
             return false;
@@ -1837,10 +1851,11 @@ namespace VkApplication
         }
 
         // copy data from staging buffer to vertex buffer
-        CopyBuffer(staginBuffer, vulkanVertexBuffer, bufferSize);
+        CopyBuffer(stagingBuffer, vulkanVertexBuffer, bufferSize);
 
-        vkDestroyBuffer( vulkanLogicalDevice, staginBuffer, nullptr);
-        staginBuffer = nullptr;
+        // Cleanup
+        vkDestroyBuffer( vulkanLogicalDevice, stagingBuffer, nullptr);
+        stagingBuffer = nullptr;
 
         vkFreeMemory(vulkanLogicalDevice, stagingBufferMemory, nullptr);
         stagingBufferMemory = nullptr;
@@ -1848,7 +1863,49 @@ namespace VkApplication
         LogSuccess("Vulkan: [Success] Create Vertex Buffer and Memory allocated.");
         return true;
     }
-    
+
+    /**
+     * @brief CreateIndexBuffer()
+     */
+    static bool CreateIndexBuffer()
+    {
+        // code
+        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory))
+        {
+            LogError("[Error] CreateBuffer() Failed.");
+            return false;
+        }
+
+        // Uploda Data to Staging buffer
+        void *data = nullptr;
+        vkMapMemory(vulkanLogicalDevice, stagingBufferMemory, 0, bufferSize, 0, &data);
+            memcpy(data, indices.data(), (size_t)bufferSize);
+        vkUnmapMemory(vulkanLogicalDevice, stagingBufferMemory);
+
+        // Create Indices buffers
+        if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanIndexBuffer, vulkanIndexBufferMemory))
+        {
+            LogError("[Error] CreateBuffer() Failed.");
+            return false;
+        }
+
+        // Copy data from staging buffer to index buffer
+        CopyBuffer(stagingBuffer, vulkanIndexBuffer, bufferSize);
+
+        // Cleanup
+        vkDestroyBuffer( vulkanLogicalDevice, stagingBuffer, nullptr);
+        stagingBuffer = nullptr;
+
+        vkFreeMemory(vulkanLogicalDevice, stagingBufferMemory, nullptr);
+        stagingBufferMemory = nullptr;
+
+        LogSuccess("Vulkan: [Success] Create Vertex Buffer and Memory allocated.");
+        return true;
+    }
 
     /**
      * @brief Initialize()
@@ -1910,10 +1967,13 @@ namespace VkApplication
         // 12. Create Vertex Buffer
         CHECK_FUNCTION_RETURN(CreateVertexBuffer());
 
-        // 13. Create Command Buffers
+        // 13. Create Index Buffer
+        CHECK_FUNCTION_RETURN(CreateIndexBuffer());
+
+        // 14. Create Command Buffers
         CHECK_FUNCTION_RETURN(CreateVulkanCommandBuffers(vulkanGraphicsCommandPool));
 
-        // 14. Create Sync Objects
+        // 15. Create Sync Objects
         CHECK_FUNCTION_RETURN(CreateVulkanSyncObjects());
 
         return true;
@@ -2065,8 +2125,11 @@ namespace VkApplication
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-        // Draw Command For Triangle
-        vkCmdDraw( commandBuffer, /* vertexCount */ static_cast<uint32_t>(vertices.size()), /* instanceCount */ 1, /* firstVertex */ 0, /* firstInstance */ 0);
+        // Bind Index buffer
+        vkCmdBindIndexBuffer(commandBuffer, vulkanIndexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+        // Draw Command
+        vkCmdDrawIndexed( commandBuffer, /* indexCount */ static_cast<uint32_t>(indices.size()), /* instanceCount */ 1, /* firstIndex */ 0, /* vertexOffset */ 0, /* firstInstance */ 0);
 
 ////////////// Finishing Up
         // The render pass can now be ended.
@@ -2200,6 +2263,18 @@ namespace VkApplication
         {
             vkFreeMemory(vulkanLogicalDevice, vulkanVertexBufferMemory, nullptr);
             vulkanVertexBufferMemory = nullptr;
+        }
+
+        if(vulkanIndexBuffer)
+        {
+            vkDestroyBuffer(vulkanLogicalDevice, vulkanIndexBuffer, nullptr);
+            vulkanIndexBuffer = nullptr;
+        }
+
+        if(vulkanIndexBufferMemory)
+        {
+            vkFreeMemory(vulkanLogicalDevice, vulkanIndexBufferMemory, nullptr);
+            vulkanIndexBufferMemory = nullptr;
         }
 
         for(uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
