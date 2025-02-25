@@ -16,6 +16,9 @@
 #include <fstream>
 
 #include "../Common/glm/glm.hpp"
+#include "../Common/glm/gtc/matrix_transform.hpp"
+
+#include <chrono>
 
 #include "Common.h"
 #include "VkApplication.h"
@@ -102,6 +105,26 @@ namespace VkApplication
         }
     };
 
+    
+    /*
+    *   Uniform Alignment Requirement:
+    *       Scalars have to be aligned by N = 4bytes
+    *       vec2 must be aligned by 2N = 8bytes
+    *       vec3 or vec4 must be aligned by 4N = 16bytes
+    *       A nested structure must be aligned by the base alignment of its members up to a multiple of 16.
+    *       A mat4 matrix must have the same alignment as a vec4.
+    * 
+    * inshort uniform buffer should have size multiple of 16 bytes, such a way that every member initial offset is multiple of 16
+    */
+    struct UniformBufferObject
+    {
+        glm::vec2 foo;
+        glm::vec2 alignment;
+        glm::mat4 modelMatrix;
+        glm::mat4 viewMatrix;
+        glm::mat4 projectionMatrix;
+    };
+
     // Variable Declaration
     std::vector<VkLayerProperties> vulkanAvailableLayerProperties;
     std::vector<VkExtensionProperties> vulkanAvailableExtensionProperties;
@@ -146,6 +169,7 @@ namespace VkApplication
     VkExtent2D vulkanSwapChainExtent;
 
     VkRenderPass vulkanRenderPass;
+    VkDescriptorSetLayout vulkanDescriptorSetLayout;
     VkPipelineLayout vulkanPipelineLayout;
     VkPipeline vulkanGraphicsPipeline;
 
@@ -169,6 +193,14 @@ namespace VkApplication
     // Index Buffer
     VkBuffer vulkanIndexBuffer;
     VkDeviceMemory vulkanIndexBufferMemory;
+
+    // Uniform Buffers
+    VkBuffer vulkanUniformBuffers[MAX_FRAMES_IN_FLIGHT];
+    VkDeviceMemory vulkanUniformBuffersMemory[MAX_FRAMES_IN_FLIGHT];
+    void* uniformBuffersMapped[MAX_FRAMES_IN_FLIGHT]{};
+
+    VkDescriptorPool vulkanDescriptorPool;
+    VkDescriptorSet vulkanDescriptorSets[MAX_FRAMES_IN_FLIGHT]; // Don't need to explicitly cleanup descriptor sets, becaise it will auto freed when desciptor pool destroyed.
 
     const std::vector<Vertex> vertices =
     {
@@ -1302,6 +1334,34 @@ namespace VkApplication
     }
 
     /**
+     * @brief CreateVulkanDescriptorSetLayout()
+    */
+    static bool CreateVulkanDescriptorSetLayout()
+    {
+        // code
+        VkDescriptorSetLayoutBinding uboLayoutBinding{};
+        uboLayoutBinding.binding = 0;           // Same value as in vertex shader.
+        uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboLayoutBinding.descriptorCount = 1;
+        uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        uboLayoutBinding.pImmutableSamplers = nullptr;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &uboLayoutBinding;
+        
+        VkResult errorCode = vkCreateDescriptorSetLayout( vulkanLogicalDevice, &layoutInfo, nullptr, &vulkanDescriptorSetLayout);
+        if(errorCode != VK_SUCCESS)
+        {
+            LogError("[Error] Failed to create descriptor set layout. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * @brief CreateVulkanGraphicsPipeline()
     */
     static bool CreateVulkanGraphicsPipeline()
@@ -1415,7 +1475,7 @@ namespace VkApplication
         rasterizerStateCreateInfo.lineWidth = 1.0f;                     // To use line width grater than 1.0f, we have to enable GPU feature.
         
         rasterizerStateCreateInfo.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterizerStateCreateInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        rasterizerStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
         rasterizerStateCreateInfo.depthBiasEnable = VK_FALSE;
         rasterizerStateCreateInfo.depthBiasConstantFactor = 0.0f;   // Optional
@@ -1493,8 +1553,8 @@ namespace VkApplication
         // The uniform values need to be specified during pipeline creation by creating VkPipelineLayout object.
         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
         pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutCreateInfo.setLayoutCount = 0;            // Optional
-        pipelineLayoutCreateInfo.pSetLayouts = nullptr;         // Optional
+        pipelineLayoutCreateInfo.setLayoutCount = 1;
+        pipelineLayoutCreateInfo.pSetLayouts = &vulkanDescriptorSetLayout;
         pipelineLayoutCreateInfo.pushConstantRangeCount = 0;    // Optional
         pipelineLayoutCreateInfo.pPushConstantRanges = nullptr; // Optional
 
@@ -1908,6 +1968,104 @@ namespace VkApplication
     }
 
     /**
+     * @brief CreateUniformBuffer()
+     */
+    static bool CreateUniformBuffer()
+    {
+        // code
+        VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+        for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, vulkanUniformBuffers[i], vulkanUniformBuffersMemory[i]))
+            {
+                LogError("[Error] CreateBuffer() Failed for Uniform at %d.", (int)i);
+                return false;
+            }
+
+            vkMapMemory(vulkanLogicalDevice, vulkanUniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief CreateDescriptorPool()
+     */
+    static bool CreateDescriptorPool()
+    {
+        // code
+        VkDescriptorPoolSize poolSize{};
+        poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+        VkResult errorCode = vkCreateDescriptorPool(vulkanLogicalDevice, &poolInfo, nullptr, &vulkanDescriptorPool);
+        if(errorCode)
+        {
+            LogError("[Error] vkCreateDescriptorPool() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief CreateDescriptorSets()
+     */
+    static bool CreateDescriptorSets()
+    {
+        // code
+        VkDescriptorSetLayout layouts[MAX_FRAMES_IN_FLIGHT];
+        for( int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            layouts[i] = vulkanDescriptorSetLayout;
+        }
+
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = vulkanDescriptorPool;
+        allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        allocInfo.pSetLayouts = layouts;
+        
+        VkResult errorCode = vkAllocateDescriptorSets(vulkanLogicalDevice, &allocInfo, vulkanDescriptorSets);
+        if(errorCode)
+        {
+            Log("vkAllocateDescriptorSets() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+            return false;
+        }
+
+        // Configure Desciptor
+        for( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            VkDescriptorBufferInfo bufferInfo{};
+            bufferInfo.buffer = vulkanUniformBuffers[i];
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(UniformBufferObject);
+
+            VkWriteDescriptorSet descriptorWrite{};
+            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite.dstSet = vulkanDescriptorSets[i];
+            descriptorWrite.dstBinding = 0;
+            descriptorWrite.dstArrayElement = 0;
+            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrite.descriptorCount = 1;
+            descriptorWrite.pBufferInfo = &bufferInfo;
+            descriptorWrite.pImageInfo = nullptr;
+            descriptorWrite.pTexelBufferView = nullptr;
+
+            vkUpdateDescriptorSets(vulkanLogicalDevice, 1, &descriptorWrite, 0, nullptr);
+        }
+
+        return true;
+    }
+
+    /**
      * @brief Initialize()
      */
     bool Initialize(HWND hwnd)
@@ -1925,37 +2083,40 @@ namespace VkApplication
             // Vulkan Supported Extensions
         GetVulkanSupportedInstanceExtensions();
         
-        // 1. Create Vulkan Instace
+        // Create Vulkan Instace
         CHECK_FUNCTION_RETURN(CreateVulkanInstance());
 
-        // 2. Setup Validation Layer
+        // Setup Validation Layer
         CHECK_FUNCTION_RETURN(SetupVulkanDebugMessenger());
 
-        // 3. Create Surface
+        // Create Surface
         CHECK_FUNCTION_RETURN(CreateVulkanSurface(hwnd));
 
-        // 4. Select Physical Device
+        // Select Physical Device
         CHECK_FUNCTION_RETURN(PickVulkanPhysicalDevice());
 
-        // 5. Setup Logical Device
+        // Setup Logical Device
         CHECK_FUNCTION_RETURN(CreateVulkanLogicalDevice());
 
-        // 6. Create Swap Chain
+        // Create Swap Chain
         CHECK_FUNCTION_RETURN(CreateVulkanSwapChain());
 
-        // 7. Create Image Views of SwapChain images
+        // Create Image Views of SwapChain images
         CHECK_FUNCTION_RETURN(CreateVulkanImageViewsForSwapchain());
 
-        // 8. Create Render Pass
+        // Create Render Pass
         CHECK_FUNCTION_RETURN(CreateVulkanRenderPass());
 
-        // 9. Create Grpahics Pipeline
+        // Create Descriptor Set Layout
+        CHECK_FUNCTION_RETURN(CreateVulkanDescriptorSetLayout());
+
+        // Create Grpahics Pipeline
         CHECK_FUNCTION_RETURN(CreateVulkanGraphicsPipeline());
 
-        // 10. Create Swapchain Framebuffer
+        // Create Swapchain Framebuffer
         CHECK_FUNCTION_RETURN(CreateVulkanFramebuffersForSwapchain());
 
-        // 11. Create Vulkan Command Pool
+        // Create Vulkan Command Pool
         QueueFamilyIndices queueFamilyIndices = FindQueueFamilies(vulkanPhysicalDevice);
             // we will be recording a command buffer every frame, so we want to be able to reset and rerecord over it.
             // We're going to record commands for drawing, which is why we've chosen the graphics queue family.
@@ -1964,16 +2125,25 @@ namespace VkApplication
             // Apply memory allocation optimizations, for that use VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
         CHECK_FUNCTION_RETURN(CreatevulkanGraphicsCommandPool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, queueFamilyIndices.transferFamily, vulkanTransferCommandPool));
 
-        // 12. Create Vertex Buffer
+        // Create Vertex Buffer
         CHECK_FUNCTION_RETURN(CreateVertexBuffer());
 
-        // 13. Create Index Buffer
+        // Create Index Buffer
         CHECK_FUNCTION_RETURN(CreateIndexBuffer());
 
-        // 14. Create Command Buffers
+        // Create Uniform Buffer
+        CHECK_FUNCTION_RETURN(CreateUniformBuffer());
+
+        // Create Descriptor Pool
+        CHECK_FUNCTION_RETURN(CreateDescriptorPool());
+
+        // Create Descriptor Sets
+        CHECK_FUNCTION_RETURN(CreateDescriptorSets());
+
+        // Create Command Buffers
         CHECK_FUNCTION_RETURN(CreateVulkanCommandBuffers(vulkanGraphicsCommandPool));
 
-        // 15. Create Sync Objects
+        // Create Sync Objects
         CHECK_FUNCTION_RETURN(CreateVulkanSyncObjects());
 
         return true;
@@ -2120,6 +2290,9 @@ namespace VkApplication
         scissor.extent = vulkanSwapChainExtent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+        // Bind Descriptor
+        vkCmdBindDescriptorSets( commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanPipelineLayout, 0, 1, &vulkanDescriptorSets[currentFrame], 0, nullptr);
+
         // Bind Vertex Buffer
         VkBuffer vertexBuffers[] = {vulkanVertexBuffer};
         VkDeviceSize offsets[] = {0};
@@ -2144,6 +2317,30 @@ namespace VkApplication
         }
 
         return true;
+    }
+
+    /**
+     * @brief UpdateUnifrmBuffer()
+     */
+    static void UpdateUnifrmBuffer(uint32_t currentImage)
+    {
+        // code
+        static std::chrono::steady_clock::time_point startTime = std::chrono::high_resolution_clock::now();
+
+        std::chrono::steady_clock::time_point currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+        UniformBufferObject ubo{};
+        ubo.modelMatrix = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.viewMatrix = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.projectionMatrix = glm::perspective(glm::radians(45.0f), vulkanSwapChainExtent.width / (float)vulkanSwapChainExtent.height, 0.1f, 10.0f);
+
+            // GLM was originally designed for OpenGL, where teh U coordinate of the clip coordinates is inverted. The easiest way to
+            // compendate for that is to flip the sign on the scaling factor of the Y axis in the projection matrix.
+        ubo.projectionMatrix[1][1] *= -1;
+
+        // copy data to uniform buffer
+        memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
     /**
@@ -2178,6 +2375,9 @@ namespace VkApplication
         vkResetCommandBuffer( vulkanCommandBuffers[currentFrame], 0);  // Make sure it is able to be recorded.
 
         RecordCommandBuffer(vulkanCommandBuffers[currentFrame], imageIndex);
+
+    // Update Uniforms
+        UpdateUnifrmBuffer(currentFrame);
 
     //  Submitting the command buffer
         VkSubmitInfo submitInfo{};
@@ -2252,6 +2452,37 @@ namespace VkApplication
         }
 
         CleanupSwapChain();
+
+
+        for(uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            if(vulkanUniformBuffers[i])
+            {
+                vkDestroyBuffer(vulkanLogicalDevice, vulkanUniformBuffers[i], nullptr);
+                vulkanUniformBuffers[i] = nullptr;
+            }
+
+            if(vulkanUniformBuffersMemory[i])
+            {
+                vkUnmapMemory(vulkanLogicalDevice, vulkanUniformBuffersMemory[i]);
+                uniformBuffersMapped[i] = nullptr;
+
+                vkFreeMemory(vulkanLogicalDevice, vulkanUniformBuffersMemory[i], nullptr);
+                vulkanUniformBuffersMemory[i] = nullptr;
+            }
+        }
+
+        if(vulkanDescriptorPool)
+        {
+            vkDestroyDescriptorPool(vulkanLogicalDevice, vulkanDescriptorPool, nullptr);
+            vulkanDescriptorPool = nullptr;
+        }
+
+        if(vulkanDescriptorSetLayout)
+        {
+            vkDestroyDescriptorSetLayout( vulkanLogicalDevice, vulkanDescriptorSetLayout, nullptr);
+            vulkanDescriptorSetLayout = nullptr;
+        }
 
         if(vulkanVertexBuffer)
         {
