@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>       // std::numeric_limits
 #include <algorithm>    // for std::clamp()
+#include <unordered_map>
 
 #include <string>
 #include <cstring>
@@ -21,8 +22,14 @@
 #include "../Common/glm/glm.hpp"
 #include "../Common/glm/gtc/matrix_transform.hpp"
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include "../Common/glm/gtx/hash.hpp"
+
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "../Common/tiny_obj_loader/tiny_obj_loader.h"
 
 #include <chrono>
 
@@ -32,44 +39,9 @@
 
 #define ENABLE_VALIDATION_LAYER 1
 
+// forward declaration
 namespace VkApplication
 {
-#ifndef MIN
-    #define MIN(a, b) ( (a) > (b) ? (b) : (a))
-#endif
-
-#ifndef MAX
-    #define MAX(a, b) ( (a) > (b) ? (a) : (b))
-#endif
-
-#ifndef CLAMP
-    #define CLAMP(_value, _min, _max)  MIN( MAX((_value), (_min)), (_max))
-#endif
-
-    // Type Declaration
-#define INVALID_QUEUE_FAMILY_HANDLE -1
-    struct QueueFamilyIndices
-    {
-        uint32_t graphicsFamily = INVALID_QUEUE_FAMILY_HANDLE;
-        uint32_t presentFamily = INVALID_QUEUE_FAMILY_HANDLE;       // Queue-specific feature which is Presenting to the Surface.
-        uint32_t transferFamily = INVALID_QUEUE_FAMILY_HANDLE;
-
-        bool IsComplete()
-        {
-            // code
-            return graphicsFamily != INVALID_QUEUE_FAMILY_HANDLE &&
-                   presentFamily != INVALID_QUEUE_FAMILY_HANDLE &&
-                   transferFamily != INVALID_QUEUE_FAMILY_HANDLE;
-        }
-    };
-
-    struct SwapChainSupportDetails
-    {
-        VkSurfaceCapabilitiesKHR capabilities;
-        std::vector<VkSurfaceFormatKHR> formats;
-        std::vector<VkPresentModeKHR> presentModes;
-    };
-
     struct Vertex
     {
         glm::vec3 position;
@@ -116,8 +88,67 @@ namespace VkApplication
 
             return attributeDescription;
         }
+    
+        bool operator==(const Vertex& other) const
+        {
+            return position == other.position &&
+                   color == other.color &&
+                   texcoord == other.texcoord;
+        }
+    };
+}
+
+
+// Template Specialization for std::hash<T>
+namespace std
+{
+    template<> struct hash<VkApplication::Vertex>
+    {
+        size_t operator()(VkApplication::Vertex const& vertex) const
+        {
+            return ((hash<glm::vec3>()(vertex.position) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+            (hash<glm::vec2>()(vertex.texcoord) << 1);
+        }
+    };
+}
+
+namespace VkApplication
+{
+#ifndef MIN
+    #define MIN(a, b) ( (a) > (b) ? (b) : (a))
+#endif
+
+#ifndef MAX
+    #define MAX(a, b) ( (a) > (b) ? (a) : (b))
+#endif
+
+#ifndef CLAMP
+    #define CLAMP(_value, _min, _max)  MIN( MAX((_value), (_min)), (_max))
+#endif
+
+    // Type Declaration
+#define INVALID_QUEUE_FAMILY_HANDLE -1
+    struct QueueFamilyIndices
+    {
+        uint32_t graphicsFamily = INVALID_QUEUE_FAMILY_HANDLE;
+        uint32_t presentFamily = INVALID_QUEUE_FAMILY_HANDLE;       // Queue-specific feature which is Presenting to the Surface.
+        uint32_t transferFamily = INVALID_QUEUE_FAMILY_HANDLE;
+
+        bool IsComplete()
+        {
+            // code
+            return graphicsFamily != INVALID_QUEUE_FAMILY_HANDLE &&
+                   presentFamily != INVALID_QUEUE_FAMILY_HANDLE &&
+                   transferFamily != INVALID_QUEUE_FAMILY_HANDLE;
+        }
     };
 
+    struct SwapChainSupportDetails
+    {
+        VkSurfaceCapabilitiesKHR capabilities;
+        std::vector<VkSurfaceFormatKHR> formats;
+        std::vector<VkPresentModeKHR> presentModes;
+    };
     
     /*
     *   Uniform Alignment Requirement:
@@ -201,14 +232,6 @@ namespace VkApplication
 
     bool framebufferResized = false;
 
-    // Vertex Buffer
-    VkBuffer vulkanVertexBuffer;
-    VkDeviceMemory vulkanVertexBufferMemory;
-
-    // Index Buffer
-    VkBuffer vulkanIndexBuffer;
-    VkDeviceMemory vulkanIndexBufferMemory;
-
     // Uniform Buffers
     VkBuffer vulkanUniformBuffers[MAX_FRAMES_IN_FLIGHT];
     VkDeviceMemory vulkanUniformBuffersMemory[MAX_FRAMES_IN_FLIGHT];
@@ -229,24 +252,20 @@ namespace VkApplication
     VkDeviceMemory vulkanDepthImageMemory;
     VkImageView vulkanDepthImageView;
 
-    const std::vector<Vertex> vertices =
-    {
-      {{ -0.5f, -0.5f,  0.0f}, { 1.0f, 0.0f, 0.0f}, { 1.0f, 0.0f}},
-      {{  0.5f, -0.5f,  0.0f}, { 0.0f, 1.0f, 0.0f}, { 0.0f, 0.0f}},
-      {{  0.5f,  0.5f,  0.0f}, { 0.0f, 0.0f, 1.0f}, { 0.0f, 1.0f}},
-      {{ -0.5f,  0.5f,  0.0f}, { 1.0f, 1.0f, 1.0f}, { 1.0f, 1.0f}},
 
-      {{ -0.5f, -0.5f, -0.5f}, { 1.0f, 0.0f, 0.0f}, { 1.0f, 0.0f}},
-      {{  0.5f, -0.5f, -0.5f}, { 0.0f, 1.0f, 0.0f}, { 0.0f, 0.0f}},
-      {{  0.5f,  0.5f, -0.5f}, { 0.0f, 0.0f, 1.0f}, { 0.0f, 1.0f}},
-      {{ -0.5f,  0.5f, -0.5f}, { 1.0f, 1.0f, 1.0f}, { 1.0f, 1.0f}}
-    };
+    const std::string MODEL_PATH = "models/viking_room.obj";
+    const std::string TEXTURE_PATH = "texture/viking_room.png";
 
-    const std::vector<uint16_t> indices =
-    {
-        0, 1, 2, 2, 3, 0,
-        4, 5, 6, 6, 7, 4
-    };
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+
+    // Model Vertex Buffer
+    VkBuffer vulkanVertexBuffer;
+    VkDeviceMemory vulkanVertexBufferMemory;
+
+    // Model Index Buffer
+    VkBuffer vulkanIndexBuffer;
+    VkDeviceMemory vulkanIndexBufferMemory;
 
     /**
      * @brief LogSwapChainSupportDetails()
@@ -2283,7 +2302,7 @@ namespace VkApplication
     {
         // code
         int texWidth = 0, texHeight = 0, texChannels = 0;
-        stbi_uc *pixels = stbi_load("texture/conan.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        stbi_uc *pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         VkDeviceSize imageSize = texWidth * texHeight * 4;
 
         if(!pixels)
@@ -2598,6 +2617,66 @@ namespace VkApplication
     }
 
     /**
+     * @brief LoadModel()
+     */
+    static bool LoadModel()
+    {
+        // code
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warnigs, errors;
+
+        if(!tinyobj::LoadObj(&attrib, &shapes, &materials, &warnigs, &errors, MODEL_PATH.c_str()))
+        {
+            LogWarning("[Warning] %s", warnigs.c_str());
+            LogError("[Error] %s", errors.c_str());
+            return false;
+        }
+
+        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
+        // We are combining all faces in the file into a single model.
+        for(const tinyobj::shape_t& shape : shapes)
+        {
+            for(const tinyobj::index_t& index : shape.mesh.indices)
+            {
+                Vertex vertex;
+
+                vertex.position =
+                {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2]
+                };
+
+                vertex.texcoord =
+                {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+                };
+
+                vertex.color = { 1.0f, 1.0f, 1.0f};
+
+                if(uniqueVertices.count(vertex) == 0)
+                {
+                    uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
+                    vertices.push_back(vertex);
+                }
+
+                indices.push_back(uniqueVertices[vertex]);
+            }
+        }
+
+        // Vertices Count: 11484, Indices Count: 11484
+        // Vertices Count: 3566, Indices Count: 11484
+        LogInfo("Vertices Count: %u, Indices Count: %u", (int)vertices.size(), (int)indices.size());
+
+        LogSuccess("[Success] \"%s\" model loaded successfully.", MODEL_PATH.c_str());
+        return true;
+    }
+
+    /**
      * @brief Initialize()
      */
     bool Initialize(HWND hwnd)
@@ -2668,6 +2747,9 @@ namespace VkApplication
 
         // Create Texture Sampler
         CHECK_FUNCTION_RETURN(CreateTextureSampler());
+
+        // Load Model
+        CHECK_FUNCTION_RETURN(LoadModel());
 
         // Create Vertex Buffer
         CHECK_FUNCTION_RETURN(CreateVertexBuffer());
@@ -2874,7 +2956,7 @@ namespace VkApplication
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
         // Bind Index buffer
-        vkCmdBindIndexBuffer(commandBuffer, vulkanIndexBuffer, 0, VK_INDEX_TYPE_UINT16);
+        vkCmdBindIndexBuffer(commandBuffer, vulkanIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         // Draw Command
         vkCmdDrawIndexed( commandBuffer, /* indexCount */ static_cast<uint32_t>(indices.size()), /* instanceCount */ 1, /* firstIndex */ 0, /* vertexOffset */ 0, /* firstInstance */ 0);
@@ -2906,7 +2988,7 @@ namespace VkApplication
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
         UniformBufferObject ubo{};
-        ubo.modelMatrix = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.modelMatrix = glm::rotate(glm::mat4(1.0f), time * glm::radians(10.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.viewMatrix = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.projectionMatrix = glm::perspective(glm::radians(45.0f), vulkanSwapChainExtent.width / (float)vulkanSwapChainExtent.height, 0.1f, 10.0f);
 

@@ -12,3 +12,4 @@ LogFile.txt
 
 # whitelist
 # !shaders/**
+!**/models/*
