@@ -241,6 +241,7 @@ namespace VkApplication
     VkDescriptorSet vulkanDescriptorSets[MAX_FRAMES_IN_FLIGHT]; // Don't need to explicitly cleanup descriptor sets, becaise it will auto freed when desciptor pool destroyed.
 
     // Texture
+    uint32_t textureMipLevels;
     VkImage vulkanTextureImage;
     VkDeviceMemory vulkanTextureImageMemory;
     VkImageView vulkanTextureImageView;
@@ -1191,7 +1192,7 @@ namespace VkApplication
     /**
      * @brief CreateImageView()
      */
-    static bool CreateImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, VkImageView *outImageView)
+    static bool CreateImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels, VkImageView *outImageView)
     {
         // code
             // An image view is quite literally a view into an image. It describes how to access the image and
@@ -1224,7 +1225,7 @@ namespace VkApplication
             // Our images will be used as color targets without any mipmapping levels or multiple layers.
         imageViewCreateInfo.subresourceRange.aspectMask = aspectFlags;
         imageViewCreateInfo.subresourceRange.baseMipLevel = 0;
-        imageViewCreateInfo.subresourceRange.levelCount = 1;
+        imageViewCreateInfo.subresourceRange.levelCount = mipLevels;
         imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
         imageViewCreateInfo.subresourceRange.layerCount = 1;
 
@@ -1250,7 +1251,7 @@ namespace VkApplication
 
         for(size_t imageIndex = 0; imageIndex < imageCount; ++imageIndex)
         {
-            if(!CreateImageView(vulkanSwapChainImages[imageIndex], vulkanSwapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, &vulkanSwapChainImageViews[imageIndex]))
+            if(!CreateImageView(vulkanSwapChainImages[imageIndex], vulkanSwapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, &vulkanSwapChainImageViews[imageIndex]))
             {
                 LogError("[Error] CreateImageView() Failed for %d.", imageIndex);
                 return false;
@@ -2133,7 +2134,7 @@ namespace VkApplication
     /**
      * @brief TransitionImageLayout()
      */
-    static bool TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout)
+    static bool TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels)
     {
         // code
             // Begin Command Buffer
@@ -2148,7 +2149,7 @@ namespace VkApplication
         barrier.image = image;
         
         barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.levelCount = mipLevels;
         barrier.subresourceRange.baseArrayLayer = 0;
         barrier.subresourceRange.layerCount = 1;
 
@@ -2239,7 +2240,7 @@ namespace VkApplication
     /**
      * @brief CreateImage2D()
      */
-    static bool CreateImage2D(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory)
+    static bool CreateImage2D(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory)
     {
         // code
         VkImageCreateInfo imageInfo{};
@@ -2248,7 +2249,7 @@ namespace VkApplication
         imageInfo.extent.width  = width;
         imageInfo.extent.height = height;
         imageInfo.extent.depth  = 1;
-        imageInfo.mipLevels     = 1;
+        imageInfo.mipLevels     = mipLevels;
         imageInfo.arrayLayers   = 1;
         imageInfo.format        = format;
         imageInfo.tiling        = tiling; // Texels are laid out in an implementation defined order for optimal access.
@@ -2298,6 +2299,123 @@ namespace VkApplication
     /**
      * @brief CreateTextureImage()
      */
+    static bool GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels)
+    {
+        // code
+            // Check if image format supports linear blitting
+        VkFormatProperties formatProperties;
+        vkGetPhysicalDeviceFormatProperties( vulkanPhysicalDevice, imageFormat, &formatProperties);
+
+            // As we have create texture image with optimal tiling we will check for 'optimalTilingFeatures'
+        if(!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT))
+        {
+            LogError("[Error] Texture image format does not support linear blitting!");
+            return false;
+        }
+
+        VkCommandBuffer commandBuffer = BeginSingleTimeCommands(vulkanGraphicsCommandPool);
+        {
+            VkImageMemoryBarrier barrier{};
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.image = image;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.layerCount = 1;
+            barrier.subresourceRange.levelCount = 1;
+
+            int32_t mipWidth = texWidth;
+            int32_t mipHeight = texHeight;
+
+            for(uint32_t i = 1; i < mipLevels; ++i)
+            {
+                barrier.subresourceRange.baseMipLevel = i - 1;
+                barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+                vkCmdPipelineBarrier(
+                    commandBuffer,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                    0, nullptr,
+                    0, nullptr,
+                    1, &barrier
+                );
+
+                VkImageBlit blit{};
+                    // Souce
+                blit.srcOffsets[0] = { 0, 0, 0};
+                blit.srcOffsets[1] = { mipWidth, mipHeight, 1};
+                blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                blit.srcSubresource.mipLevel = i - 1;
+                blit.srcSubresource.baseArrayLayer = 0;
+                blit.srcSubresource.layerCount = 1;
+
+                    // Destination
+                blit.dstOffsets[0] = { 0, 0, 0};
+                blit.dstOffsets[1] = { mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1};
+                blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                blit.dstSubresource.mipLevel = i;
+                blit.dstSubresource.baseArrayLayer = 0;
+                blit.dstSubresource.layerCount = 1;
+                
+                vkCmdBlitImage(commandBuffer,
+                    image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    1, &blit,
+                    VK_FILTER_LINEAR
+                );
+
+                barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+                vkCmdPipelineBarrier(
+                    commandBuffer,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+                    0, nullptr,
+                    0, nullptr,
+                    1, &barrier
+                );
+
+                if(mipWidth > 1)
+                {
+                    mipWidth /= 2;
+                }
+
+                if(mipHeight > 1)
+                {
+                    mipHeight /= 2;
+                }
+            }
+
+            // This Barrier transitions the last mip level from 'VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL' to 'VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL'.
+            // This wasn't handled by the loop, since the last mip level is never blitted from.
+            barrier.subresourceRange.baseMipLevel = mipLevels - 1;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+            vkCmdPipelineBarrier(
+                commandBuffer,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+                0, nullptr,
+                0, nullptr,
+                1, &barrier
+            );
+        }
+        EndSingleTimeCommands(vulkanGraphicsCommandPool, commandBuffer, vulkanGraphicsQueue);   // vkCmdBlitImage() must be submitted to a queue with graphics capability.
+
+        return true;
+    }
+
+    /**
+     * @brief CreateTextureImage()
+     */
     static bool CreateTextureImage()
     {
         // code
@@ -2310,6 +2428,9 @@ namespace VkApplication
             LogError("[Error] Failed to load texture image!");
             return false;
         }
+
+        // Calculate mip-map level
+        textureMipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
 
         // Creating Staging Buffer
         VkBuffer stagingBuffer;
@@ -2332,14 +2453,14 @@ namespace VkApplication
         pixels = nullptr;
 
         // Create texture
-        if( !CreateImage2D( static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanTextureImage, vulkanTextureImageMemory))
+        if( !CreateImage2D( static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), textureMipLevels, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanTextureImage, vulkanTextureImageMemory))
         {
             LogError("[Error] CreateImage2D() Failed.");
             return false;
         }
 
         // Transition image layout as destination for transfer.
-        if(!TransitionImageLayout( vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
+        if(!TransitionImageLayout( vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, textureMipLevels))
         {
             LogError("[Error] TransitionImageLayout() Failed.");
             return false;
@@ -2348,13 +2469,19 @@ namespace VkApplication
         // Copy data from staging buffer to image.
         CopyBufferToImage(stagingBuffer, vulkanTextureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
 
-        // Transition image layout to start sampling from the texture image in the shader.
-        if(!TransitionImageLayout(vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL))
+        // // Transition image layout to start sampling from the texture image in the shader.
+        // if(!TransitionImageLayout(vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, textureMipLevels))
+        // {
+        //     LogError("[Error] TransitionImageLayout() Failed.");
+        //     return false;
+        // }
+
+        // Generate Mipmaps
+        if(!GenerateMipmaps(vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, textureMipLevels))
         {
-            LogError("[Error] TransitionImageLayout() Failed.");
+            LogError("[Error] GenerateMipmaps() Failed.");
             return false;
         }
-
 
         // clenaup
         vkDestroyBuffer(vulkanLogicalDevice, stagingBuffer, nullptr);
@@ -2371,7 +2498,7 @@ namespace VkApplication
     static bool CreateTextureImageView()
     {
         // code
-        if(!CreateImageView(vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, &vulkanTextureImageView))
+        if(!CreateImageView(vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, textureMipLevels, &vulkanTextureImageView))
         {
             LogError("[Error] CreateImageView() Failed.");
             return false;
@@ -2427,8 +2554,8 @@ namespace VkApplication
 
         samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
         samplerInfo.mipLodBias = 0.0f;
-        samplerInfo.minLod = 0.0f;
-        samplerInfo.maxLod = 0.0f;
+        samplerInfo.minLod = 0.0f; //static_cast<float>(textureMipLevels / 2);;
+        samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
 
         VkResult errorCode = vkCreateSampler(vulkanLogicalDevice, &samplerInfo, nullptr, &vulkanTextureSampler);
         if(errorCode)
@@ -2593,7 +2720,7 @@ namespace VkApplication
         VkFormat depthFormat = FindDepthFormat();
         
         if(!CreateImage2D(
-            vulkanSwapChainExtent.width, vulkanSwapChainExtent.height, depthFormat,
+            vulkanSwapChainExtent.width, vulkanSwapChainExtent.height, 1, depthFormat,
             VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanDepthImage, vulkanDepthImageMemory))
         {
@@ -2601,13 +2728,13 @@ namespace VkApplication
             return false;
         }
         
-        if(!CreateImageView(vulkanDepthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, &vulkanDepthImageView))
+        if(!CreateImageView(vulkanDepthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, &vulkanDepthImageView))
         {
             LogError("[Error] CreateImageView() Failed.");
             return false;
         }
 
-        if(!TransitionImageLayout(vulkanDepthImage, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL))
+        if(!TransitionImageLayout(vulkanDepthImage, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1))
         {
             LogError("[Error] TransitionImageLayout() Failed.");
             return false;
