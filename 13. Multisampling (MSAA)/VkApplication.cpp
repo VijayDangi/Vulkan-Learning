@@ -268,6 +268,14 @@ namespace VkApplication
     VkBuffer vulkanIndexBuffer;
     VkDeviceMemory vulkanIndexBufferMemory;
 
+    // MSAA
+    VkSampleCountFlagBits msaaSamplesCount = VK_SAMPLE_COUNT_1_BIT;
+
+    // MSAA Resolved Color buffer
+    VkImage vulkanMSAAColorImage;
+    VkDeviceMemory vulkanMSAAColorImageMemory;
+    VkImageView vulkanMSAAColorImageView;
+
     /**
      * @brief LogSwapChainSupportDetails()
      */
@@ -805,6 +813,28 @@ namespace VkApplication
     }
 
     /**
+     * @brief GetMaxUsableSampleCount()
+     */
+    VkSampleCountFlagBits GetMaxUsableSampleCount()
+    {
+        // code
+        VkPhysicalDeviceProperties physicalDeviceProperties;
+        vkGetPhysicalDeviceProperties( vulkanPhysicalDevice, &physicalDeviceProperties);
+
+        // get sample counts which are supported by both color and depth buffer.
+        VkSampleCountFlags sampleCounts = physicalDeviceProperties.limits.framebufferColorSampleCounts & physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+        
+        if(sampleCounts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
+        if(sampleCounts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
+        if(sampleCounts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
+        if(sampleCounts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
+        if(sampleCounts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
+        if(sampleCounts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
+
+        return VK_SAMPLE_COUNT_1_BIT;
+    }
+
+    /**
      * @brief IsPhysicalDeviceSuitable()
      *              Check whether device is suitable for the operations we want to perform.
      */
@@ -921,9 +951,10 @@ namespace VkApplication
                 VkPhysicalDeviceProperties deviceProperties{};
                 vkGetPhysicalDeviceProperties(device, &deviceProperties);
 
-                LogInfo("Vulkan: Selected Physical Device Name - \"%s\"", deviceProperties.deviceName);
-
                 vulkanPhysicalDevice = device;
+                msaaSamplesCount = GetMaxUsableSampleCount();
+
+                LogInfo("Vulkan: Selected Physical Device Name - \"%s\", with sample count: %d", deviceProperties.deviceName, (int)msaaSamplesCount);
                 break;
             }
         }
@@ -987,6 +1018,7 @@ namespace VkApplication
             // Right Now we don't need anythi special, so we can simply defint it and leave everyting to VK_FALSE.
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.samplerAnisotropy = VK_TRUE; // Enable Anisotrophy Feature.
+        deviceFeatures.sampleRateShading = VK_TRUE; // Enable sample shading feature for the device.
 
         ///////////////// Creating the logical device
         VkDeviceCreateInfo deviceCreateInfo{};
@@ -1330,7 +1362,7 @@ namespace VkApplication
 ////////////// Color Attachment Description.
         VkAttachmentDescription colorAttachmentDescrition{};
         colorAttachmentDescrition.format = vulkanSwapChainImageFormat;
-        colorAttachmentDescrition.samples = VK_SAMPLE_COUNT_1_BIT;
+        colorAttachmentDescrition.samples = msaaSamplesCount;
 
         // 'loadOp' and 'storeOp' determine what to do with the data in the attachment before rendering and
         // after rendering.
@@ -1356,18 +1388,30 @@ namespace VkApplication
         // VK_IMAGE_LAYOUT_PRESENT_SRC_KHR          :- Images to be presented in the swap chain.
         // VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL     :- Images to be used as destination for a memory copy operation.
         colorAttachmentDescrition.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;        // Specifies which layout the image will have before the render pass begins.
-        colorAttachmentDescrition.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;    // Specifies the layout to automatically transition to when the render pass finishes.
+            // we changes finalLayout from 'VK_IMAGE_LAYOUT_PRESENT_SRC_KHR' to 'VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL' as multisampled images cannot be presented directly.
+        colorAttachmentDescrition.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;    // Specifies the layout to automatically transition to when the render pass finishes.
 
 ////////////// Depth Attachment Description.
         VkAttachmentDescription depthAttachmentDescription{};
         depthAttachmentDescription.format         = FindDepthFormat();
-        depthAttachmentDescription.samples        = VK_SAMPLE_COUNT_1_BIT;
+        depthAttachmentDescription.samples        = msaaSamplesCount;
         depthAttachmentDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
         depthAttachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         depthAttachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         depthAttachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         depthAttachmentDescription.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
         depthAttachmentDescription.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+////////////// Color Resolve Attachment Description.
+        VkAttachmentDescription colorAttachmentResolveDescription{};
+        colorAttachmentResolveDescription.format         = vulkanSwapChainImageFormat;
+        colorAttachmentResolveDescription.samples        = VK_SAMPLE_COUNT_1_BIT;
+        colorAttachmentResolveDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachmentResolveDescription.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachmentResolveDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachmentResolveDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachmentResolveDescription.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachmentResolveDescription.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
 ////////////// Subpasses and attachment references.
         // A single render pass can consist of multiple subpasses. Subpasses are subsequent rendering operations that depend on the
@@ -1381,11 +1425,16 @@ namespace VkApplication
         depthAttachmentReference.attachment = 1;
         depthAttachmentReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+        VkAttachmentReference colorAttachmentResolveReference{};
+        colorAttachmentResolveReference.attachment = 2;
+        colorAttachmentResolveReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
         VkSubpassDescription subpassDescription{};
         subpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpassDescription.colorAttachmentCount = 1;
         subpassDescription.pColorAttachments = &colorAttachmentReference;
         subpassDescription.pDepthStencilAttachment = &depthAttachmentReference;
+        subpassDescription.pResolveAttachments = &colorAttachmentResolveReference;
 
         
         VkSubpassDependency subpassDependency{};
@@ -1393,13 +1442,13 @@ namespace VkApplication
         subpassDependency.dstSubpass = 0;
 
         subpassDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-        subpassDependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        subpassDependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
         subpassDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         subpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
 ////////////// Render Pass
-        VkAttachmentDescription attachments[] = { colorAttachmentDescrition, depthAttachmentDescription};
+        VkAttachmentDescription attachments[] = { colorAttachmentDescrition, depthAttachmentDescription, colorAttachmentResolveDescription};
 
         VkRenderPassCreateInfo renderPassCreateInfo{};
         renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -1588,9 +1637,9 @@ namespace VkApplication
         // Enabling it requires enabling a GPU feature.
         VkPipelineMultisampleStateCreateInfo multisampleCreateInfo{};
         multisampleCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-        multisampleCreateInfo.sampleShadingEnable = VK_FALSE;
-        multisampleCreateInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-        multisampleCreateInfo.minSampleShading = 1.0f;          // Optional
+        multisampleCreateInfo.sampleShadingEnable = VK_TRUE;
+        multisampleCreateInfo.minSampleShading = .2f;   // min fraction for sample shading; closer to one is smoother
+        multisampleCreateInfo.rasterizationSamples = msaaSamplesCount;
         multisampleCreateInfo.pSampleMask = nullptr;            // Optional
         multisampleCreateInfo.alphaToCoverageEnable = VK_FALSE; // Optional
         multisampleCreateInfo.alphaToOneEnable = VK_FALSE;      // Optional
@@ -1746,7 +1795,8 @@ namespace VkApplication
         // Iterate through the image views and create framebuffers from them:
         for(size_t i = 0; i < vulkanSwapChainImageViews.size(); ++i)
         {
-            VkImageView attachments[] = { vulkanSwapChainImageViews[i], vulkanDepthImageView};
+            // Order of image views should be same as described while creating render pass.
+            VkImageView attachments[] = { vulkanMSAAColorImageView, vulkanDepthImageView, vulkanSwapChainImageViews[i]};
 
             VkFramebufferCreateInfo framebufferCreateInfo{};
             framebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -2240,7 +2290,7 @@ namespace VkApplication
     /**
      * @brief CreateImage2D()
      */
-    static bool CreateImage2D(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory)
+    static bool CreateImage2D(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory)
     {
         // code
         VkImageCreateInfo imageInfo{};
@@ -2256,7 +2306,7 @@ namespace VkApplication
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         imageInfo.usage         = usage;
         imageInfo.sharingMode   = VK_SHARING_MODE_CONCURRENT;    // Image will only be used by one queue family: the one that supports graphics (and therefore also) transfer operations.
-        imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.samples       = numSamples;
         imageInfo.flags         = 0;
 
         QueueFamilyIndices indices = FindQueueFamilies(vulkanPhysicalDevice);
@@ -2453,7 +2503,7 @@ namespace VkApplication
         pixels = nullptr;
 
         // Create texture
-        if( !CreateImage2D( static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), textureMipLevels, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanTextureImage, vulkanTextureImageMemory))
+        if( !CreateImage2D( static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), textureMipLevels, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanTextureImage, vulkanTextureImageMemory))
         {
             LogError("[Error] CreateImage2D() Failed.");
             return false;
@@ -2690,6 +2740,32 @@ namespace VkApplication
     }
 
     /**
+     * @brief CreateColorResources()
+     */
+    static bool CreateColorResources()
+    {
+        // code
+        VkFormat colorFormat = vulkanSwapChainImageFormat;
+
+        if(!CreateImage2D( vulkanSwapChainExtent.width, vulkanSwapChainExtent.height, 1, msaaSamplesCount, colorFormat,
+            VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanMSAAColorImage, vulkanMSAAColorImageMemory))
+        {
+            LogError("[Error] CreateImage2D() Failed.");
+            return false;
+        }
+
+        if(!CreateImageView(vulkanMSAAColorImage, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, &vulkanMSAAColorImageView))
+        {
+            LogError("[Error] CreateImageView() Failed.");
+            return false;
+        }
+
+        return true;
+    }
+
+
+    /**
      * @brief FindDepthFormat()
      */
     static VkFormat FindDepthFormat()
@@ -2720,7 +2796,7 @@ namespace VkApplication
         VkFormat depthFormat = FindDepthFormat();
         
         if(!CreateImage2D(
-            vulkanSwapChainExtent.width, vulkanSwapChainExtent.height, 1, depthFormat,
+            vulkanSwapChainExtent.width, vulkanSwapChainExtent.height, 1, msaaSamplesCount, depthFormat,
             VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanDepthImage, vulkanDepthImageMemory))
         {
@@ -2860,7 +2936,10 @@ namespace VkApplication
             // Apply memory allocation optimizations, for that use VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
         CHECK_FUNCTION_RETURN(CreateVulkanCommandPool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, queueFamilyIndices.transferFamily, vulkanTransferCommandPool));
 
-        // Cretae Depth Attachment Image
+        // Create MSAA Color Attachment Image
+        CHECK_FUNCTION_RETURN(CreateColorResources());
+
+        // Create Depth Attachment Image
         CHECK_FUNCTION_RETURN(CreateDepthResources());
 
         // Create Swapchain Framebuffer
@@ -2960,6 +3039,24 @@ namespace VkApplication
             vkFreeMemory(vulkanLogicalDevice, vulkanDepthImageMemory, nullptr);
             vulkanDepthImageMemory = nullptr;
         }
+
+        if(vulkanMSAAColorImageView)
+        {
+            vkDestroyImageView(vulkanLogicalDevice, vulkanMSAAColorImageView, nullptr);
+            vulkanMSAAColorImageView = nullptr;
+        }
+
+        if(vulkanMSAAColorImage)
+        {
+            vkDestroyImage(vulkanLogicalDevice, vulkanMSAAColorImage, nullptr);
+            vulkanMSAAColorImage = nullptr;
+        }
+
+        if(vulkanMSAAColorImageMemory)
+        {
+            vkFreeMemory(vulkanLogicalDevice, vulkanMSAAColorImageMemory, nullptr);
+            vulkanMSAAColorImageMemory = nullptr;
+        }
     }
 
     /**
@@ -2991,6 +3088,7 @@ namespace VkApplication
 
         CreateVulkanSwapChain();
         CreateVulkanImageViewsForSwapchain();
+        CreateColorResources();
         CreateDepthResources();
         CreateVulkanFramebuffersForSwapchain();
     }
