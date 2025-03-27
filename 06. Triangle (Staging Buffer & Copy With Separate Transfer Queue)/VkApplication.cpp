@@ -1315,14 +1315,16 @@ namespace VkApplication
 
         if(!vertexShaderModule || !fragmentShaderModule)
         {
-            if(vertexShaderModule)
-            {
-                vkDestroyShaderModule( vulkanLogicalDevice, fragmentShaderModule, nullptr);
-            }
-            
             if(fragmentShaderModule)
             {
+                vkDestroyShaderModule( vulkanLogicalDevice, fragmentShaderModule, nullptr);
+                fragmentShaderModule = nullptr;
+            }
+            
+            if(vertexShaderModule)
+            {
                 vkDestroyShaderModule( vulkanLogicalDevice, vertexShaderModule, nullptr);
+                vertexShaderModule = nullptr;
             }
 
             return false;
