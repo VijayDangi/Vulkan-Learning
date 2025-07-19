@@ -67,7 +67,6 @@ namespace VkApplication
     struct Vertex
     {
         glm::vec2 position;
-        glm::vec3 color;
 
         static VkVertexInputBindingDescription getBindingDescription()
         {
@@ -84,22 +83,16 @@ namespace VkApplication
             return bindingDescription;
         }
 
-        static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions()
+        static std::array<VkVertexInputAttributeDescription, 1> getAttributeDescriptions()
         {
             // code
-            std::array<VkVertexInputAttributeDescription, 2> attributeDescription{};
+            std::array<VkVertexInputAttributeDescription, 1> attributeDescription{};
 
             // position
             attributeDescription[0].binding = 0;
             attributeDescription[0].location = 0;   // Shader Input Location Attribute.
             attributeDescription[0].format = VK_FORMAT_R32G32_SFLOAT;
             attributeDescription[0].offset = offsetof(Vertex, position);
-
-            // color
-            attributeDescription[1].binding = 0;
-            attributeDescription[1].location = 1;   // Shader Input Location Attribute.
-            attributeDescription[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-            attributeDescription[1].offset = offsetof(Vertex, color);
 
             return attributeDescription;
         }
@@ -118,11 +111,15 @@ namespace VkApplication
     */
     struct UniformBufferObject
     {
-        glm::vec2 foo;
-        glm::vec2 alignment;
         glm::mat4 modelMatrix;
         glm::mat4 viewMatrix;
         glm::mat4 projectionMatrix;
+    };
+
+    struct PushConstant
+    {
+        glm::vec4 position_offset;
+        glm::vec4 color;
     };
 
     // Variable Declaration
@@ -204,13 +201,35 @@ namespace VkApplication
 
     const std::vector<Vertex> vertices =
     {
-      {{ -0.5f, -0.5f}, { 1.0f, 0.0f, 0.0f}},
-      {{  0.5f, -0.5f}, { 0.0f, 1.0f, 0.0f}},
-      {{  0.5f,  0.5f}, { 0.0f, 0.0f, 1.0f}},
-      {{ -0.5f,  0.5f}, { 1.0f, 1.0f, 1.0f}}
+      {{ -0.5f, -0.5f}},
+      {{  0.5f, -0.5f}},
+      {{  0.5f,  0.5f}},
+      {{ -0.5f,  0.5f}}
     };
 
     const std::vector<uint16_t> indices = { 0, 1, 2, 2, 3, 0 };
+
+    struct PushConstant rectPushConstants[] = {
+        {{ -4.00f,  3.00f, 0.00f, 0.00f}, { 1.00f, 1.00f, 1.00f, 1.00f}},
+        {{ -1.50f,  3.00f, 0.00f, 0.00f}, { 1.00f, 0.00f, 0.00f, 1.00f}},
+        {{  1.50f,  3.00f, 0.00f, 0.00f}, { 0.00f, 1.00f, 0.00f, 1.00f}},
+        {{  4.00f,  3.00f, 0.00f, 0.00f}, { 0.00f, 0.00f, 1.00f, 1.00f}},
+
+        {{ -4.00f,  1.00f, 0.00f, 0.00f}, { 0.75f, 0.75f, 0.75f, 0.75f}},
+        {{ -1.50f,  1.00f, 0.00f, 0.00f}, { 0.75f, 0.00f, 0.00f, 0.75f}},
+        {{  1.50f,  1.00f, 0.00f, 0.00f}, { 0.00f, 0.75f, 0.00f, 0.75f}},
+        {{  4.00f,  1.00f, 0.00f, 0.00f}, { 0.00f, 0.00f, 0.75f, 0.75f}},
+
+        {{ -4.00f, -1.00f, 0.00f, 0.00f}, { 0.50f, 0.50f, 0.50f, 0.50f}},
+        {{ -1.50f, -1.00f, 0.00f, 0.00f}, { 0.50f, 0.00f, 0.00f, 0.50f}},
+        {{  1.50f, -1.00f, 0.00f, 0.00f}, { 0.00f, 0.50f, 0.00f, 0.50f}},
+        {{  4.00f, -1.00f, 0.00f, 0.00f}, { 0.00f, 0.00f, 0.50f, 0.50f}},
+
+        {{ -4.00f, -3.00f, 0.00f, 0.00f}, { 0.25f, 0.25f, 0.25f, 0.25f}},
+        {{ -1.50f, -3.00f, 0.00f, 0.00f}, { 0.25f, 0.00f, 0.00f, 0.25f}},
+        {{  1.50f, -3.00f, 0.00f, 0.00f}, { 0.00f, 0.25f, 0.00f, 0.25f}},
+        {{  4.00f, -3.00f, 0.00f, 0.00f}, { 0.00f, 0.00f, 0.25f, 0.25f}}
+    };
 
     /**
      * @brief LogSwapChainSupportDetails()
@@ -1417,7 +1436,7 @@ namespace VkApplication
         VkPipelineVertexInputStateCreateInfo vertexInputCreateInfo{};
 
         VkVertexInputBindingDescription bindingDescription = Vertex::getBindingDescription();
-        std::array<VkVertexInputAttributeDescription, 2> attributeDescription = Vertex::getAttributeDescriptions();
+        std::array<VkVertexInputAttributeDescription, 1> attributeDescription = Vertex::getAttributeDescriptions();
 
         vertexInputCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
         vertexInputCreateInfo.vertexBindingDescriptionCount = 1;
@@ -1552,13 +1571,22 @@ namespace VkApplication
         colorBlendingCreateInfo.blendConstants[3] = 0.0f;   // Optional
 
 ////////////// Pipeline Layout
+        // Define the push constant range used by the pipeline layout
+        // Note that the specification only requires a minimum of 128 bytes, so for passing larger blocks of data
+        //  you'd use UBOs or SSBOs
+        VkPushConstantRange pushConstantRange{};
+            // Push Constant will only be accessible at the selected pipeline stage.
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(struct PushConstant);
+
         // The uniform values need to be specified during pipeline creation by creating VkPipelineLayout object.
         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
         pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutCreateInfo.setLayoutCount = 1;
         pipelineLayoutCreateInfo.pSetLayouts = &vulkanDescriptorSetLayout;
-        pipelineLayoutCreateInfo.pushConstantRangeCount = 0;    // Optional
-        pipelineLayoutCreateInfo.pPushConstantRanges = nullptr; // Optional
+        pipelineLayoutCreateInfo.pushConstantRangeCount = 1;    // Optional
+        pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange; // Optional
 
         VkResult errorCode = vkCreatePipelineLayout(vulkanLogicalDevice, &pipelineLayoutCreateInfo, nullptr, &vulkanPipelineLayout);
         if(errorCode)
@@ -2304,7 +2332,12 @@ namespace VkApplication
         vkCmdBindIndexBuffer(commandBuffer, vulkanIndexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
         // Draw Command
-        vkCmdDrawIndexed( commandBuffer, /* indexCount */ static_cast<uint32_t>(indices.size()), /* instanceCount */ 1, /* firstIndex */ 0, /* vertexOffset */ 0, /* firstInstance */ 0);
+        uint32_t instanceCount = sizeof(rectPushConstants) / sizeof(rectPushConstants[0]);
+        for( uint32_t i = 0; i < instanceCount; ++i)
+        {
+            vkCmdPushConstants( commandBuffer, vulkanPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct PushConstant), &rectPushConstants[i]);
+            vkCmdDrawIndexed( commandBuffer, /* indexCount */ static_cast<uint32_t>(indices.size()), /* instanceCount */ 1, /* firstIndex */ 0, /* vertexOffset */ 0, /* firstInstance */ 0);
+        }
 
 ////////////// Finishing Up
         // The render pass can now be ended.
@@ -2333,9 +2366,13 @@ namespace VkApplication
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
         UniformBufferObject ubo{};
-        ubo.modelMatrix = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.viewMatrix = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.projectionMatrix = glm::perspective(glm::radians(45.0f), vulkanSwapChainExtent.width / (float)vulkanSwapChainExtent.height, 0.1f, 10.0f);
+
+        ubo.modelMatrix = glm::translate( glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+        ubo.modelMatrix = glm::rotate(ubo.modelMatrix, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
+        ubo.viewMatrix = glm::lookAt(glm::vec3(.0f, 0.0f, 10.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        
+        ubo.projectionMatrix = glm::perspective(glm::radians(45.0f), vulkanSwapChainExtent.width / (float)vulkanSwapChainExtent.height, 0.1f, 30.0f);
 
             // GLM was originally designed for OpenGL, where teh U coordinate of the clip coordinates is inverted. The easiest way to
             // compendate for that is to flip the sign on the scaling factor of the Y axis in the projection matrix.
