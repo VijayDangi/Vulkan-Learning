@@ -1,6 +1,16 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
+#include <Windows.h>
+
+#define VK_USE_PLATFORM_WIN32_KHR   // Used to include <vulkan/vulkan_win32.h>
+#include <vulkan/vulkan.h>
+
+#include <iostream>
+
+#include "../Common/glm/glm.hpp"
+#include "../Common/glm/gtc/matrix_transform.hpp"
+
 #define LOG_CONSOLE_TEXT_WHITE_COLOR    0
 #define LOG_CONSOLE_BKG_BLACK_COLOR     0
 
