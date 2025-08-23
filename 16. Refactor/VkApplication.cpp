@@ -10,13 +10,11 @@
 #include <limits>       // std::numeric_limits
 
 #include <string>
-#include <fstream>
 
 #include <chrono>
 
 #include "VkApplication.h"
-#include "VulkanHelper.h"
-#include "Types.h"
+#include "VkUtil.h"
 
 #define VK_ENABLE_VALIDATION_LAYER 1
 
@@ -36,27 +34,33 @@
 namespace VkApplication
 {
     // Variable Declaration
-    std::vector<VkLayerProperties> vulkanAvailableLayerProperties;
-    std::vector<VkExtensionProperties> vulkanAvailableExtensionProperties;
+    const std::vector<const char*> vulkanRequiredInstanceLayers = {
+#if VK_ENABLE_VALIDATION_LAYER
+        "VK_LAYER_KHRONOS_validation"
+#endif
+    };
+    const std::vector<const char*> vulkanRequiredInstanceExtesion = {
+        VK_KHR_SURFACE_EXTENSION_NAME,
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+#if VK_ENABLE_VALIDATION_LAYER
+            // To set up callback in the program to handle messages and the associated details, we have to set
+            // up a debug messenger with a callback using the "VK_EXT_debug_utils" extension.
+        VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+#endif
+    };
 
-    std::vector<const char*> vulkanAvailableLayerNames;
-    std::vector<const char*> vulkanAvailableExtensionNames;
-
-    const std::vector<const char*> vulkanRequiredValidationLayers = { "VK_LAYER_KHRONOS_validation" };
     const std::vector<const char*> vulkanRequiredDeviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
     const int MAX_FRAMES_IN_FLIGHT = 2; // Defines how many frames should be processed concurrently.
     uint32_t currentFrame = 0;  // Track of the current frame.
 
     // Vulkan Specific Variables
-    VkInstance               vulkanInstance{ VK_NULL_HANDLE };
-    VkDebugUtilsMessengerEXT vulkanDebugMessenger{ VK_NULL_HANDLE };
-
+    VkInstance          vkInstance{ VK_NULL_HANDLE };
     VkSurfaceKHR        vulkanSurface{ VK_NULL_HANDLE };
     VkPhysicalDevice    vulkanPhysicalDevice{ VK_NULL_HANDLE }; // This object will be implicitly destroyedd when 'VkInstance' is destroyed.
     VkDevice            vulkanLogicalDevice{ VK_NULL_HANDLE };  // Vulkan Logical Device
 
-    Vk::Types::QueueFamilyIndices vulkanSelectedPhysicalDeviceQueueFamily;
+    VkUtil::Types::QueueFamilyIndices vulkanSelectedPhysicalDeviceQueueFamily;
 
     VkQueue vulkanGraphicsQueue{ VK_NULL_HANDLE };        // Devices queue are implicitly cleaned up when device is destroyed.
     VkQueue vulkanPresentationQueue{ VK_NULL_HANDLE };    // Devices queue are implicitly cleaned up when device is destroyed.
@@ -86,14 +90,14 @@ namespace VkApplication
     VkFence inFlightFences[MAX_FRAMES_IN_FLIGHT]{ VK_NULL_HANDLE };                  // To make sure only one frame is rendering at a time.
 
 
-    Vk::Types::VulkanBuffer vulkanVertexBuffer; // Vertex Buffer
-    Vk::Types::VulkanBuffer vulkanIndexBuffer;  // Index Buffer
-    Vk::Types::VulkanUniformBuffer vulkanUniformBuffers[MAX_FRAMES_IN_FLIGHT];  // Uniform Buffers
+    VkUtil::Types::VulkanBuffer vulkanVertexBuffer; // Vertex Buffer
+    VkUtil::Types::VulkanBuffer vulkanIndexBuffer;  // Index Buffer
+    VkUtil::Types::VulkanUniformBuffer vulkanUniformBuffers[MAX_FRAMES_IN_FLIGHT];  // Uniform Buffers
 
     VkDescriptorPool vulkanDescriptorPool{ VK_NULL_HANDLE };
     VkDescriptorSet vulkanDescriptorSets[MAX_FRAMES_IN_FLIGHT]{ VK_NULL_HANDLE }; // Don't need to explicitly cleanup descriptor sets, becaise it will auto freed when desciptor pool destroyed.
 
-    const std::vector<Vk::Types::Vertex> vertices =
+    const std::vector<VkUtil::Types::Vertex> vertices =
     {
       {{ -0.5f, -0.5f}},
       {{  0.5f, -0.5f}},
@@ -103,7 +107,7 @@ namespace VkApplication
 
     const std::vector<uint16_t> indices = { 0, 1, 2, 2, 3, 0 };
 
-    struct Vk::Types::PushConstant rectPushConstants[] = {
+    struct VkUtil::Types::PushConstant rectPushConstants[] = {
         {{ -4.00f,  3.00f, 0.00f, 0.00f}, { 1.00f, 1.00f, 1.00f, 1.00f}},
         {{ -1.50f,  3.00f, 0.00f, 0.00f}, { 1.00f, 0.00f, 0.00f, 1.00f}},
         {{  1.50f,  3.00f, 0.00f, 0.00f}, { 0.00f, 1.00f, 0.00f, 1.00f}},
@@ -130,7 +134,7 @@ namespace VkApplication
     /**
      * @brief LogSwapChainSupportDetails()
      */
-    static void LogSwapChainSupportDetails(Vk::Types::SwapChainSupportDetails& details)
+    static void LogSwapChainSupportDetails(VkUtil::Types::SwapChainSupportDetails& details)
     {
         // code
         std::string log_string;
@@ -176,343 +180,6 @@ namespace VkApplication
     }
 
     /**
-     * @brief GetVulkanSupportedInstanceExtensions()
-     *          Get Vulkan instance supported extensions.
-     */
-    static void GetVulkanSupportedInstanceExtensions()
-    {
-        // Get Instance Extension Properties Count.
-        uint32_t vulkanExtensionCount = 0;
-        VkResult vulkanErrorCode = vkEnumerateInstanceExtensionProperties( nullptr, &vulkanExtensionCount, nullptr);
-        if(vulkanErrorCode)
-        {
-            LogError("Vulkan: Failed to query instance extension properties count: %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
-            return;
-        }
-
-        // Get Instance Extension Properties.
-        vulkanAvailableExtensionProperties.resize(vulkanExtensionCount);
-
-        vulkanErrorCode = vkEnumerateInstanceExtensionProperties(nullptr, &vulkanExtensionCount, vulkanAvailableExtensionProperties.data());
-        if(vulkanErrorCode)
-        {
-            LogError("Vulkan: Failed to query instance extensions properties : %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
-            return;
-        }
-
-        vulkanAvailableExtensionProperties.resize(vulkanExtensionCount);
-
-        std::string out_string = "\n";
-        out_string += "Vulkan Instances Extensions Properties: \n";
-        for(uint32_t i = 0; i < vulkanExtensionCount; ++i)
-        {
-            out_string = out_string + "\t\tName: " + vulkanAvailableExtensionProperties[i].extensionName + "\n";
-            out_string = out_string + "\t\tSpec Version: " +  std::to_string( vulkanAvailableExtensionProperties[i].specVersion) + " " + "\n\n";
-            vulkanAvailableExtensionNames.push_back( vulkanAvailableExtensionProperties[i].extensionName);
-        }
-
-        Log("Vulkan Supported Extension Count: %u", vulkanExtensionCount);
-        Log("%s", out_string.c_str());
-    }
-
-    /**
-     * @brief CheckValidationLayerSupport()
-     *          Retrieve and check vulkan layer extension support or not.
-     */
-    static bool CheckValidationLayerSupport()
-    {
-        // code
-        if(vulkanAvailableLayerProperties.size() == 0)
-        {
-            uint32_t layerCount = 0;
-            VkResult vulkanErrorCode = vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-            if(vulkanErrorCode)
-            {
-                LogError("Vulkan: Failed to query instance layer properties count: %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
-                return false;
-            }
-
-            vulkanAvailableLayerProperties.resize(layerCount);
-            vulkanErrorCode = vkEnumerateInstanceLayerProperties(&layerCount, vulkanAvailableLayerProperties.data());
-            if(vulkanErrorCode)
-            {
-                LogError("Vulkan: Failed to query instance layer properties: %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
-                return false;
-            }
-
-            std::string out_string = "\n";
-            out_string += "Vulkan Instance Layer Properties: \n";
-            for(uint32_t i = 0; i < layerCount; ++i)
-            {
-                out_string = out_string + "\t\t" + "LayerName             : " + vulkanAvailableLayerProperties[i].layerName + "\n";
-                out_string = out_string + "\t\t" + "Description           : " + vulkanAvailableLayerProperties[i].description + "\n";
-                out_string = out_string + "\t\t" + "Implementation Version: " + std::to_string(vulkanAvailableLayerProperties[i].implementationVersion) + "\n";
-                out_string = out_string + "\t\t" + "Spec Version          : " + std::to_string( VK_API_VERSION_MAJOR(vulkanAvailableLayerProperties[i].specVersion)) + "."
-                                                                              + std::to_string( VK_API_VERSION_MINOR(vulkanAvailableLayerProperties[i].specVersion)) + "."
-                                                                              + std::to_string( VK_API_VERSION_PATCH(vulkanAvailableLayerProperties[i].specVersion))
-                                                                              + "\n\n";
-
-                vulkanAvailableLayerNames.push_back( vulkanAvailableLayerProperties[i].layerName);
-            }
-
-            Log("Vulkan Supported Layer Count: %u", layerCount);
-            Log("%s", out_string.c_str());
-        }
-
-        // Check if all of the layers in 'vulkanRequiredValidationLayers' exist in the 'vulkanAvailableLayerProperties' list.
-        for(const char *layerName : vulkanRequiredValidationLayers)
-        {
-            bool layerFound = false;
-
-            for(const VkLayerProperties& layerProperties : vulkanAvailableLayerProperties)
-            {
-                if(strcmp(layerName, layerProperties.layerName) == 0)
-                {
-                    layerFound = true;
-                    break;
-                }
-            }
-
-            if(!layerFound)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * @brief VulkanDebugCallback()
-     *              Vulkan debug call signature => PFN_vkDebugUtilsMessengerCallbackEXT
-     * 
-     * @return:
-     *      The callback returns a boolean that indicated if the Vulkan call that triggered the validation layer message
-     *      should be aborted.
-     *      If returns true, then the call is aborted with the 'VK_ERROR_VALIDATION_FAILED_EXT' error. this is normally used
-     *          to test the validation layers themselves.
-     */
-    VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDebugCallback( VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData, void *pUserData)
-    {
-        // code
-            // Severity:
-            //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:    Diagnostic Message.
-            //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:       Informational message like the creation of a resource.
-            //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:    Message about behavior that is not necessarily an error,
-            //                                                              but very likely a bug in your application.
-            //      VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:      Message about behavior that is invalid and may cause crashes.
-
-            // Message Type:
-            //      VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT:                    Some event has happened that is unrelated to the specification or performance.
-            //      VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATIONL_BIT_EXT:                Something has happened that violated the specification or indicates a possible mistake.
-            //      VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT:                Potential non-optimal use of Vulkan.
-            //      VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT:     The implementation has modified the set of GPU-visible virtual addresses associated with a Vulkan object.
-        switch(messageSeverity)
-        {
-            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
-                Log("Validation Layer: %s", pCallbackData->pMessage);
-                break;
-
-            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
-                LogInfo("Validation Layer: %s", pCallbackData->pMessage);
-                break;
-
-            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
-                LogWarning("Validation Layer: %s", pCallbackData->pMessage);
-                break;
-
-            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
-                LogError("Validation Layer: %s", pCallbackData->pMessage);
-                break;
-        }
-
-        return VK_FALSE;
-    }
-
-    /**
-     * @brief __vkCreateDebugUtilsMessengerEXT()
-     */
-    static VkResult __vkCreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkDebugUtilsMessengerEXT *pDebugMessenger)
-    {
-        // code
-        // The above struct have to passed to vkCreateDebugUtilsMessagerEXT() function to create VkDebugUtilsMessengerEXT object.
-        // Unfortunatly, because this function is an extension function, it is not automatically loaded.
-        PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
-        if(vkCreateDebugUtilsMessengerEXT)
-        {
-            return vkCreateDebugUtilsMessengerEXT(instance, pCreateInfo, pAllocator, pDebugMessenger);
-        }
-
-        return VK_ERROR_EXTENSION_NOT_PRESENT;
-    }
-
-    /**
-     * @brief __vkDestroyDebugUtilsMessengerEXT()
-     */
-    static void __vkDestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks *pAllocator)
-    {
-        // code
-        // This function is an extension function, so it is needed to be explicitly loaded.
-        PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
-        if(vkDestroyDebugUtilsMessengerEXT)
-        {
-            vkDestroyDebugUtilsMessengerEXT(instance, debugMessenger, pAllocator);
-        }
-    }
-
-    /**
-     * @brief PopulateDebugMessengerCreateInfo()
-     */
-    static void PopulateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo)
-    {
-        // code
-        createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-
-        createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                                     VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
-                                     VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                                     VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-
-        createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                                 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                                 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT |
-                                 VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT;
-
-        createInfo.pfnUserCallback = VulkanDebugCallback;
-        createInfo.pUserData = nullptr;
-    }
-
-    /**
-     * @brief CreateVulkanInstance() :
-     *              Initialize the Vulkan Library by creating an instance.
-     *              The instance is the connection between our application and the vulkan library and 
-     *              creating it involves specifying some details about our application to the driver.
-     */
-    static bool CreateVulkanInstance()
-    {
-        // code
-        VkResult vulkanErrorCode;
-
-        // Vulkan Supported Extensions
-        GetVulkanSupportedInstanceExtensions();
-
-        ////////////////////////////////////
-#if VK_ENABLE_VALIDATION_LAYER
-        if(!CheckValidationLayerSupport())
-        {
-            LogError("Vulkan: validation layers requested, but not available!!!");
-            return false;
-        }
-#endif
-
-        /*
-            typedef struct VkApplicationInfo {
-                VkStructureType    sType;
-                const void*        pNext;
-                const char*        pApplicationName;
-                uint32_t           applicationVersion;
-                const char*        pEngineName;
-                uint32_t           engineVersion;
-                uint32_t           apiVersion;
-            } VkApplicationInfo;
-        */
-        VkApplicationInfo appInfo{};                            // Optional Struct
-        appInfo.sType               = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName    = "Hello Triangle";
-        appInfo.applicationVersion  = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.pEngineName         = "No Engine";
-        appInfo.engineVersion       = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion          = VK_API_VERSION_1_0;
-        appInfo.pNext               = nullptr;
-
-        /*
-            typedef struct VkInstanceCreateInfo {
-                VkStructureType             sType;
-                const void*                 pNext;
-                VkInstanceCreateFlags       flags;
-                const VkApplicationInfo*    pApplicationInfo;
-                uint32_t                    enabledLayerCount;
-                const char* const*          ppEnabledLayerNames;
-                uint32_t                    enabledExtensionCount;
-                const char* const*          ppEnabledExtensionNames;
-            } VkInstanceCreateInfo;
-        */
-        VkInstanceCreateInfo createInfo{};
-        createInfo.sType            = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-        createInfo.pApplicationInfo = &appInfo;
-
-            // Required Extensions which we want to enabled.
-        std::vector<const char *> requiredExtensions;
-
-        requiredExtensions.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
-        requiredExtensions.emplace_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
-
-#if VK_ENABLE_VALIDATION_LAYER
-            // To set up callback in the program to handle messages and the associated details, we have to set
-            // up a debug messenger with a callback using the "VK_EXT_debug_utils" extension.
-        requiredExtensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-#endif
-
-        createInfo.enabledExtensionCount   = requiredExtensions.size();
-        createInfo.ppEnabledExtensionNames = requiredExtensions.data();
-
-#if VK_ENABLE_VALIDATION_LAYER
-        VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{}; // Placed this variable outside of if statement to ensure that it is not destroyed before the 'vkCreateInstance()' call.
-            // Enable Validation Layer.
-        createInfo.enabledLayerCount = static_cast<uint32_t>(vulkanRequiredValidationLayers.size());
-        createInfo.ppEnabledLayerNames = vulkanRequiredValidationLayers.data();
-
-            // To create a separate debug utils messenger specifically for 'vkCreateInstace()' and 'vkDestroyInstance()'
-            // function calls. It requires you to simply pass a pointer to a 'vkDebugUtilsMessengerCreateInfoEXT' struct
-            // in the 'pNext' extension field of 'vkInstanceCreateInfo()'.
-        PopulateDebugMessengerCreateInfo(debugCreateInfo);
-        createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT*) &debugCreateInfo;
-#else
-        createInfo.enabledLayerCount = 0;
-        createInfo.ppEnabledLayerNames = nullptr;
-#endif
-
-        vulkanErrorCode = vkCreateInstance(&createInfo, nullptr, &vulkanInstance);
-        if(vulkanErrorCode != VK_SUCCESS)
-        {
-            LogError("vkCreateInstance() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
-            return false;
-        }
-        else
-        {
-#if VK_ENABLE_VALIDATION_LAYER
-            LogSuccess("vkCreateInstance() Success with Validation Enabled.");
-#else
-            LogSuccess("vkCreateInstance() Success with Validation Disabled.");
-#endif
-        }
-
-        return true;
-    }
-
-#if VK_ENABLE_VALIDATION_LAYER
-    /**
-     * @brief SetupVulkanDebugMessenger() :
-     *              If validation layer enabled, setup vulkan debug callback.
-     */
-    static bool SetupVulkanDebugMessenger()
-    {
-        // code
-        VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo{};
-        PopulateDebugMessengerCreateInfo(debugMessengerCreateInfo);
-
-        VkResult errorCode = __vkCreateDebugUtilsMessengerEXT(vulkanInstance, &debugMessengerCreateInfo, nullptr, &vulkanDebugMessenger);
-        if(errorCode != VK_SUCCESS)
-        {
-            LogError("vkCreateDebugUtilsMessengerEXT() Failed: %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
-        return true;
-    }
-#endif
-
-    /**
      * @brief CreateVulkanSurface()
      */
     static bool CreateVulkanSurface(HWND windowHandle)
@@ -523,7 +190,7 @@ namespace VkApplication
         win32SurfaceCreateInfo.hwnd = windowHandle;
         win32SurfaceCreateInfo.hinstance = GetModuleHandle(nullptr);
 
-        VkResult errorCode = vkCreateWin32SurfaceKHR(vulkanInstance, &win32SurfaceCreateInfo, nullptr, &vulkanSurface);
+        VkResult errorCode = vkCreateWin32SurfaceKHR(vkInstance, &win32SurfaceCreateInfo, nullptr, &vulkanSurface);
         if(errorCode != VK_SUCCESS)
         {
             LogError("Vulkam: [Error] vkCreateWin32SurfaceKHR() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
@@ -538,10 +205,10 @@ namespace VkApplication
     /**
      * @brief FindQueueFamilies()
      */
-    static Vk::Types::QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device)
+    static VkUtil::Types::QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device)
     {
         // code
-        Vk::Types::QueueFamilyIndices queueIndices;
+        VkUtil::Types::QueueFamilyIndices queueIndices;
 
         uint32_t queueFamilyCount = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
@@ -622,17 +289,17 @@ namespace VkApplication
     /**
      * @brief QuerySwapChainSupport()
      */
-    static Vk::Types::SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device)
+    static VkUtil::Types::SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device)
     {
         // code
-        Vk::Types::SwapChainSupportDetails details;
+        VkUtil::Types::SwapChainSupportDetails details;
 
         // Query Surface Capabilities
         VkResult errorCode = vkGetPhysicalDeviceSurfaceCapabilitiesKHR( device, vulkanSurface, &details.capabilities);
         if(errorCode)
         {
             LogError("Vulkan: [Error] vkGetPhysicalDeviceSurfaceCapabililtiesKHR() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return Vk::Types::SwapChainSupportDetails();
+            return VkUtil::Types::SwapChainSupportDetails();
         }
 
         // Querying Supported surface formats.
@@ -677,7 +344,7 @@ namespace VkApplication
         // Let's consider our application only usable for dedicated graphics card that support geometry shaders.
         return (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) && deviceFeatures.geometryShader;
 #else
-        Vk::Types::QueueFamilyIndices indices = FindQueueFamilies(device);
+        VkUtil::Types::QueueFamilyIndices indices = FindQueueFamilies(device);
 
         bool extensionSupported = CheckDeviceExtensionSupport(device);
 
@@ -686,7 +353,7 @@ namespace VkApplication
         {
             // For now Swap chain support if sufficient if there is at least one supported image format
             // and one supported presentation mode given the window surface we have.
-            Vk::Types::SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(device);
+            VkUtil::Types::SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(device);
             swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
         }
 
@@ -702,7 +369,7 @@ namespace VkApplication
         // code
             // Listing the graphics cards.
         uint32_t deviceCount = 0;
-        VkResult vulkanErrorCode = vkEnumeratePhysicalDevices(vulkanInstance, &deviceCount, nullptr);
+        VkResult vulkanErrorCode = vkEnumeratePhysicalDevices(vkInstance, &deviceCount, nullptr);
         if(deviceCount == 0)
         {
             LogError("Vulkan [Error]: Failed to find GPUs with Vulkan Support!");
@@ -710,7 +377,7 @@ namespace VkApplication
         }
 
         std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
-        vulkanErrorCode = vkEnumeratePhysicalDevices(vulkanInstance, &deviceCount, physicalDevices.data());
+        vulkanErrorCode = vkEnumeratePhysicalDevices(vkInstance, &deviceCount, physicalDevices.data());
         if(vulkanErrorCode)
         {
             LogError("Vulkan [Error]: vkEnumeratePhysicalDevices() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
@@ -856,10 +523,10 @@ namespace VkApplication
         deviceCreateInfo.enabledExtensionCount   = static_cast<uint32_t>(vulkanRequiredDeviceExtensions.size());
         deviceCreateInfo.ppEnabledExtensionNames = vulkanRequiredDeviceExtensions.data();
 
-#if VK_ENABLE_VALIDATION_LAYER
-        deviceCreateInfo.enabledLayerCount       = static_cast<uint32_t>(vulkanAvailableLayerNames.size());
-        deviceCreateInfo.ppEnabledLayerNames     = vulkanAvailableLayerNames.data();
-#endif
+        uint32_t layerCount = 0;
+        const char** supportedInstanceLayers = VkUtil::GetVulkanInstanceSupportedLayers(&layerCount);
+        deviceCreateInfo.enabledLayerCount       = layerCount;
+        deviceCreateInfo.ppEnabledLayerNames     = supportedInstanceLayers;
 
         VkResult errorCode = vkCreateDevice(vulkanPhysicalDevice /* Device to interface with */, &deviceCreateInfo, nullptr, &vulkanLogicalDevice);
         if(errorCode != VK_SUCCESS)
@@ -951,7 +618,7 @@ namespace VkApplication
     static bool CreateVulkanSwapChain()
     {
         // code
-        Vk::Types::SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(vulkanPhysicalDevice);
+        VkUtil::Types::SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(vulkanPhysicalDevice);
 
         VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.formats);
         VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.presentModes);
@@ -1101,63 +768,6 @@ namespace VkApplication
     }
 
     /**
-     * @brief ReadFile()
-     */
-    static bool ReadFile(const std::string& filename, /* _Out_ */ std::vector<char>& out_data)
-    {
-        // code
-        std::ifstream file(filename, std::ios::ate /* Start reading at the end of the file */ | std::ios::binary /* Read the file as binary file */);
-
-        if(!file.is_open())
-        {
-            LogError("[Error] Failed to open file '%s'.", filename.c_str());
-            return false;
-        }
-
-        size_t fileSize = (size_t) file.tellg();
-
-        out_data.clear();
-        out_data.resize(fileSize);
-
-        // seek to the beaginning of the file
-        file.seekg(0);
-        file.read(out_data.data(), fileSize);
-
-        file.close();
-
-        return true;
-    }
-
-    /**
-     * @brief CreateVulkanShaderModule()
-    */
-    VkShaderModule CreateVulkanShaderModule(const std::vector<char>& shader_code)
-    {
-        // code
-            // Shader modules are just a thin wrapper around the shader bytecode that we've previously loaded from a file
-            // and the functions defined in it. The compilation and linking of the SPIR-V bytecode to machine code for
-            // execution by the GPU doesn't happen until the graphics pipeline is created.
-        VkShaderModuleCreateInfo shaderModuleCreateInfo{};
-        shaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        shaderModuleCreateInfo.codeSize = shader_code.size();
-
-            // When we perform casting from char* to uint32_t*, we also need to ensure that the data satisfies
-            // the alignment requirements of uint32_t. Luckly, the data is stored in an std::vector where the default
-            // allocator already ensures that the data satisfies the worst case alignment requirements.
-        shaderModuleCreateInfo.pCode = reinterpret_cast<const uint32_t*>(shader_code.data());
-
-        VkShaderModule shaderModule = nullptr;
-        VkResult errorCode = vkCreateShaderModule( vulkanLogicalDevice, &shaderModuleCreateInfo, nullptr, &shaderModule);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkCreateShaderModule() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return nullptr;
-        }
-
-        return shaderModule;
-    }
-
-    /**
      * @brief CreateVulkanRenderPass()
      * @return 
      */
@@ -1279,19 +889,9 @@ namespace VkApplication
     static bool CreateVulkanGraphicsPipeline()
     {
         // code
-////////////// Loading a shader.
-        std::vector<char> vertexShaderCode;
-        std::vector<char> fragmentShaderCode;
-
-        if(!ReadFile("shaders/triangle.vert.spv", vertexShaderCode) ||
-           !ReadFile("shaders/triangle.frag.spv", fragmentShaderCode))
-        {
-            return false;
-        }
-
 ////////////// Creating shader modules.
-        VkShaderModule vertexShaderModule = CreateVulkanShaderModule(vertexShaderCode);
-        VkShaderModule fragmentShaderModule = CreateVulkanShaderModule(fragmentShaderCode);
+        VkShaderModule vertexShaderModule = VkUtil::CreateVkShaderModuleFromFile(vulkanLogicalDevice, "shaders/triangle.vert.spv");
+        VkShaderModule fragmentShaderModule = VkUtil::CreateVkShaderModuleFromFile(vulkanLogicalDevice, "shaders/triangle.frag.spv");
 
         if(!vertexShaderModule || !fragmentShaderModule)
         {
@@ -1328,8 +928,8 @@ namespace VkApplication
 ////////////// Vertex Input
         VkPipelineVertexInputStateCreateInfo vertexInputCreateInfo{};
 
-        VkVertexInputBindingDescription bindingDescription = Vk::Types::Vertex::getBindingDescription();
-        std::array<VkVertexInputAttributeDescription, 1> attributeDescription = Vk::Types::Vertex::getAttributeDescriptions();
+        VkVertexInputBindingDescription bindingDescription = VkUtil::Types::Vertex::getBindingDescription();
+        std::array<VkVertexInputAttributeDescription, 1> attributeDescription = VkUtil::Types::Vertex::getAttributeDescriptions();
 
         vertexInputCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
         vertexInputCreateInfo.vertexBindingDescriptionCount = 1;
@@ -1471,7 +1071,7 @@ namespace VkApplication
             // Push Constant will only be accessible at the selected pipeline stage.
         pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pushConstantRange.offset = 0;
-        pushConstantRange.size = sizeof(struct Vk::Types::PushConstant);
+        pushConstantRange.size = sizeof(struct VkUtil::Types::PushConstant);
 
         // The uniform values need to be specified during pipeline creation by creating VkPipelineLayout object.
         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
@@ -1572,62 +1172,6 @@ namespace VkApplication
     }
 
     /**
-     * @brief CreateVulkanCommandPool()
-     */
-    static bool CreateVulkanCommandPool(VkCommandPoolCreateFlags poolCreateFlag, uint32_t queueFamilyIndex, VkCommandPool &out_commandPool)
-    {
-        // code
-            // Command pools manages the memory that is used to store the buffers and command buffers
-            // are allocated from them.
-        VkCommandPoolCreateInfo commandPoolCreateInfo{};
-        commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        //
-        //  VK_COMMAND_POOL_CREATE_TRANSIENT_BIT : Hind that command buffers are rerecorded with new commands very often (may change memory allocation behaviour)
-        //  VK_COMMAND_POOL_CREATE_REST_COMMAND_BUFFER_BIT : Allow command buffers to be rerecorded individually, without this flag they all have to be reset together.
-        //  VK_COMMAND_POOL_CREATE_PROTECTED_BIT  : Specifies that command buffers allocated from the pool are protected command buffers.
-        //
-        commandPoolCreateInfo.flags = poolCreateFlag;
-        commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
-
-        VkResult errorCode = vkCreateCommandPool(vulkanLogicalDevice, &commandPoolCreateInfo, nullptr, &out_commandPool);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkCreateCommandPool() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
-        LogSuccess("Vulkan: [Success] Vulkan Command Pool Created for QueueFamilyIndex: %u.", queueFamilyIndex);
-
-        return true;
-    }
-
-    /**
-     * @brief CreateVulkanCommandBuffers()
-     */
-    static bool CreateVulkanCommandBuffers(VkCommandPool commandPool)
-    {
-        // code
-        VkCommandBufferAllocateInfo allocateInfo{};
-        allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocateInfo.commandPool = commandPool;
-
-        // VK_COMMAND_BUFFER_LEVEL_PRIMARY : Can be submitted to a queue for execution, but cannot be called from other command buffers.
-        // VK_COMMAND_BUFFER_LEVEL_SECONDARY : Cannot be submitted directly, but can be called from primary command buffers.
-        allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocateInfo.commandBufferCount = MAX_FRAMES_IN_FLIGHT;
-
-        VkResult errorCode = vkAllocateCommandBuffers( vulkanLogicalDevice, &allocateInfo, vulkanCommandBuffers);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkAllocateCommandBuffers() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
-        LogSuccess("Vulkan: [Success] Create Command Buffer.");
-        return true;
-    }
-
-    /**
      * @brief CreateVulkanSyncObjects()
      */
     static bool CreateVulkanSyncObjects()
@@ -1672,139 +1216,9 @@ namespace VkApplication
     }
 
     /**
-     * @brief FindVulkanMemoryType()
-     */
-    static uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
-    {
-        // code
-        // Get available types of memory.
-        VkPhysicalDeviceMemoryProperties memProperties{};
-        vkGetPhysicalDeviceMemoryProperties(vulkanPhysicalDevice, &memProperties);
-
-        for(uint32_t i = 0; i < memProperties.memoryTypeCount; ++i)
-        {
-            if( (typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
-            {
-                return i;
-            }
-        }
-
-        LogError("Failed To Find Suitable memory type.");
-        return -1;
-    }
-
-    /**
-     * @brief CreateBuffer()
-     */
-    static bool CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
-    {
-        // code
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = size;         // Sizeof of buffer.
-        bufferInfo.usage = usage;       // Purpose of buffer (can specify multiple purposes).
-        bufferInfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
-
-        uint32_t queueFamiliesIndices[] = { vulkanSelectedPhysicalDeviceQueueFamily.graphicsFamily, vulkanSelectedPhysicalDeviceQueueFamily.transferFamily};
-        bufferInfo.queueFamilyIndexCount = 2;
-        bufferInfo.pQueueFamilyIndices = queueFamiliesIndices;
-
-        VkResult errorCode = vkCreateBuffer( vulkanLogicalDevice, &bufferInfo, nullptr, &buffer);
-        if(errorCode != VK_SUCCESS)
-        {
-            LogError("Vulkan: [Error] vkCreateBuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
-        // Memory Requirement
-        VkMemoryRequirements memRequirements;
-        vkGetBufferMemoryRequirements(vulkanLogicalDevice, buffer, &memRequirements);
-
-        // Memory Allocation
-        VkMemoryAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.allocationSize = memRequirements.size;
-        uint32_t memoryType = FindMemoryType(memRequirements.memoryTypeBits, memoryProperties);
-        if(memoryType == -1)
-        {
-            LogError("FindMemoryType() Failed.");
-            return false;
-        }
-        allocInfo.memoryTypeIndex = memoryType;
-
-        errorCode = vkAllocateMemory( vulkanLogicalDevice, &allocInfo, nullptr, &bufferMemory);
-        if(errorCode != VK_SUCCESS)
-        {
-            LogError("Vulkan: [Error] vkAllocateBuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
-        // Associate Memory with buffer
-        vkBindBufferMemory( vulkanLogicalDevice, buffer, bufferMemory, 0);
-
-        return true;
-    }
-
-    /**
-     * @brief CopyBuffer()
-     */
-    static void CopyBuffer(VkBuffer sourceBuffer, VkBuffer destinationBuffer, VkDeviceSize size)
-    {
-        // code
-        VkCommandBufferAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandPool = vulkanTransferCommandPool;
-        allocInfo.commandBufferCount = 1;
-
-        VkCommandBuffer commandBuffer;
-        vkAllocateCommandBuffers(vulkanLogicalDevice, &allocInfo, &commandBuffer);
-
-        // Start Recording Command
-            // We're only going to use the command buffer once and wait with returning from the function until
-            // the copy operation has finished executing. It's good practice to tell the driver about our intent
-            // using 'VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT'.
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-        vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-        // Copy Command
-            // Contents of buffers are transferred using the 'vkCmdCopyBuffer()' command. It takes the source and destination
-            // buffers as arguments, and an array of regions to copy.
-        VkBufferCopy copyRegion{};
-        copyRegion.srcOffset = 0;
-        copyRegion.dstOffset = 0;
-        copyRegion.size = size;
-
-        vkCmdCopyBuffer( commandBuffer, sourceBuffer, destinationBuffer, 1, &copyRegion);
-
-        // End Recording Command
-        vkEndCommandBuffer(commandBuffer);
-
-        // Execute commands
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffer;
-
-        vkQueueSubmit(vulkanTransferQueue, 1, &submitInfo, VK_NULL_HANDLE);
-
-            // Unlike the draw commands, there are no events we need to wait on this time. We just want to execute
-            // the transfer on the buffers immediately.
-            // There are again two possible ways to wait on this transfer to complete. We could use a fence and wait with
-            // 'vkWaitForFences()', or simply wait for the transfer queue to become idle with 'vkQueueWaitIdle()'.
-        vkQueueWaitIdle(vulkanTransferQueue);
-
-        vkFreeCommandBuffers(vulkanLogicalDevice, vulkanTransferCommandPool, 1, &commandBuffer);
-        commandBuffer = nullptr;
-    }
-
-    /**
      * @brief CreateVulkanBuffer()
      */
-    static bool CreateVulkanBuffer( VkDeviceSize maxBufferSize, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties, Vk::Types::VulkanBuffer& buffer, void *data = nullptr, size_t dataSizeBytes = 0)
+    static bool CreateVulkanBuffer( VkDeviceSize maxBufferSize, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties, VkUtil::Types::VulkanBuffer& buffer, void *data = nullptr, size_t dataSizeBytes = 0)
     {
         // Code
         if(maxBufferSize < dataSizeBytes)
@@ -1818,8 +1232,11 @@ namespace VkApplication
             dataSizeBytes = maxBufferSize;
         }
 
+        uint32_t queueFamiliesIndices[] = { vulkanSelectedPhysicalDeviceQueueFamily.graphicsFamily, vulkanSelectedPhysicalDeviceQueueFamily.transferFamily};
+        uint32_t numQueues = 2;
+
         // Create required buffer
-        if(!CreateBuffer( maxBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage, memoryProperties, buffer.handle, buffer.memory))
+        if(!VkUtil::CreateVkBuffer( vulkanPhysicalDevice, vulkanLogicalDevice, maxBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage, memoryProperties, queueFamiliesIndices, numQueues, buffer.handle, buffer.memory))
         {
             LogError("CreateBuffer() Failed.");
             return false;
@@ -1828,8 +1245,8 @@ namespace VkApplication
         // if there is data then copy it to buffer.
         if(data != nullptr)
         {
-            Vk::Types::VulkanBuffer stagingBuffer{};
-            if(!CreateBuffer( maxBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer.handle, stagingBuffer.memory))
+            VkUtil::Types::VulkanBuffer stagingBuffer{};
+            if(!VkUtil::CreateVkBuffer( vulkanPhysicalDevice, vulkanLogicalDevice, maxBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, queueFamiliesIndices, numQueues, stagingBuffer.handle, stagingBuffer.memory))
             {
                 LogError("CreateBuffer() Failed.");
                 return false;
@@ -1843,7 +1260,7 @@ namespace VkApplication
             mapped_ptr = nullptr;
 
             // Copy Data from staging to buffer
-            CopyBuffer(stagingBuffer.handle, buffer.handle, dataSizeBytes);
+            VkUtil::CopyVkBuffer(vulkanLogicalDevice, vulkanTransferCommandPool, vulkanTransferQueue, stagingBuffer.handle, buffer.handle, dataSizeBytes);
 
             // Cleanup
             if(stagingBuffer.handle)
@@ -1865,12 +1282,15 @@ namespace VkApplication
     /**
      * @brief CreateUniformBuffer()
      */
-    static bool CreateUniformBuffer( VkDeviceSize bufferSize, Vk::Types::VulkanUniformBuffer *uniformBuffers, size_t maxFramesInFlight = MAX_FRAMES_IN_FLIGHT)
+    static bool CreateUniformBuffer( VkDeviceSize bufferSize, VkUtil::Types::VulkanUniformBuffer *uniformBuffers, size_t maxFramesInFlight = MAX_FRAMES_IN_FLIGHT)
     {
         // code
+        uint32_t queueFamiliesIndices[] = { vulkanSelectedPhysicalDeviceQueueFamily.graphicsFamily, vulkanSelectedPhysicalDeviceQueueFamily.transferFamily};
+        uint32_t numQueues = 2;
+
         for(size_t i = 0; i < maxFramesInFlight; ++i)
         {
-            if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i].handle, uniformBuffers[i].memory))
+            if(!VkUtil::CreateVkBuffer( vulkanPhysicalDevice, vulkanLogicalDevice, bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, queueFamiliesIndices, numQueues, uniformBuffers[i].handle, uniformBuffers[i].memory))
             {
                 LogError("[Error] CreateBuffer() Failed for Uniform at %d.", (int)i);
                 return false;
@@ -1939,7 +1359,7 @@ namespace VkApplication
             VkDescriptorBufferInfo bufferInfo{};
             bufferInfo.buffer = vulkanUniformBuffers[i].handle;
             bufferInfo.offset = 0;
-            bufferInfo.range = sizeof(Vk::Types::UniformBufferObject);
+            bufferInfo.range = sizeof(VkUtil::Types::UniformBufferObject);
 
             VkWriteDescriptorSet descriptorWrite{};
             descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1972,12 +1392,7 @@ namespace VkApplication
         VkResult vulkanErrorCode;
 
         // Create Vulkan Instance
-        CHECK_FUNCTION_RETURN(CreateVulkanInstance());
-
-#if VK_ENABLE_VALIDATION_LAYER
-        // Setup Validation Layer
-        CHECK_FUNCTION_RETURN(SetupVulkanDebugMessenger());
-#endif
+        CHECK_FUNCTION_RETURN(VkUtil::CreateVulkanInstance(vulkanRequiredInstanceLayers.data(), vulkanRequiredInstanceLayers.size(), vulkanRequiredInstanceExtesion.data(), (uint32_t)vulkanRequiredInstanceExtesion.size(), VK_ENABLE_VALIDATION_LAYER, &vkInstance));
 
         // Create Surface
         CHECK_FUNCTION_RETURN(CreateVulkanSurface(windowHandle));
@@ -2032,10 +1447,10 @@ namespace VkApplication
         // Create Vulkan Command Pool
             // we will be recording a command buffer every frame, so we want to be able to reset and re-record over it.
             // We're going to record commands for drawing, which is why we've chosen the graphics queue family.
-        CHECK_FUNCTION_RETURN(CreateVulkanCommandPool(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, vulkanSelectedPhysicalDeviceQueueFamily.graphicsFamily, vulkanGraphicsCommandPool));
+        CHECK_FUNCTION_RETURN(VkUtil::CreateVkCommandPool(vulkanLogicalDevice, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, vulkanSelectedPhysicalDeviceQueueFamily.graphicsFamily, &vulkanGraphicsCommandPool));
 
             // Apply memory allocation optimizations, for that use VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
-        CHECK_FUNCTION_RETURN(CreateVulkanCommandPool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, vulkanSelectedPhysicalDeviceQueueFamily.transferFamily, vulkanTransferCommandPool));
+        CHECK_FUNCTION_RETURN(VkUtil::CreateVkCommandPool(vulkanLogicalDevice, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, vulkanSelectedPhysicalDeviceQueueFamily.transferFamily, &vulkanTransferCommandPool));
 
         // Create Vertex Buffer
         CHECK_FUNCTION_RETURN(CreateVulkanBuffer(sizeof(vertices[0]) * vertices.size(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanVertexBuffer, (void*) vertices.data()));
@@ -2044,7 +1459,7 @@ namespace VkApplication
         CHECK_FUNCTION_RETURN(CreateVulkanBuffer(sizeof(indices[0]) * indices.size(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanIndexBuffer, (void*) indices.data()));
 
         // Create Uniform Buffer
-        CHECK_FUNCTION_RETURN(CreateUniformBuffer(sizeof(Vk::Types::UniformBufferObject), vulkanUniformBuffers));
+        CHECK_FUNCTION_RETURN(CreateUniformBuffer(sizeof(VkUtil::Types::UniformBufferObject), vulkanUniformBuffers));
 
         // Create Descriptor Pool
         CHECK_FUNCTION_RETURN(CreateDescriptorPool());
@@ -2053,7 +1468,7 @@ namespace VkApplication
         CHECK_FUNCTION_RETURN(CreateDescriptorSets());
 
         // Create Command Buffers
-        CHECK_FUNCTION_RETURN(CreateVulkanCommandBuffers(vulkanGraphicsCommandPool));
+        CHECK_FUNCTION_RETURN(VkUtil::CreateVkCommandBuffers(vulkanLogicalDevice, vulkanGraphicsCommandPool, MAX_FRAMES_IN_FLIGHT, vulkanCommandBuffers));
 
         // Create Sync Objects
         CHECK_FUNCTION_RETURN(CreateVulkanSyncObjects());
@@ -2216,7 +1631,7 @@ namespace VkApplication
         uint32_t instanceCount = sizeof(rectPushConstants) / sizeof(rectPushConstants[0]);
         for( uint32_t i = 0; i < instanceCount; ++i)
         {
-            vkCmdPushConstants( commandBuffer, vulkanPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct Vk::Types::PushConstant), &rectPushConstants[i]);
+            vkCmdPushConstants( commandBuffer, vulkanPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(struct VkUtil::Types::PushConstant), &rectPushConstants[i]);
             vkCmdDrawIndexed( commandBuffer, /* indexCount */ static_cast<uint32_t>(indices.size()), /* instanceCount */ 1, /* firstIndex */ 0, /* vertexOffset */ 0, /* firstInstance */ 0);
         }
 
@@ -2246,7 +1661,7 @@ namespace VkApplication
         std::chrono::steady_clock::time_point currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-        Vk::Types::UniformBufferObject ubo{};
+        VkUtil::Types::UniformBufferObject ubo{};
 
         ubo.modelMatrix = glm::translate( glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
         ubo.modelMatrix = glm::rotate(ubo.modelMatrix, time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
@@ -2495,25 +1910,13 @@ namespace VkApplication
             vulkanLogicalDevice = nullptr;
         }
 
-#if VK_ENABLE_VALIDATION_LAYER
-        if(vulkanDebugMessenger)
-        {
-            __vkDestroyDebugUtilsMessengerEXT(vulkanInstance, vulkanDebugMessenger, nullptr);
-            vulkanDebugMessenger = nullptr;
-        }
-#endif
-
         if(vulkanSurface)
         {
-            vkDestroySurfaceKHR(vulkanInstance, vulkanSurface, nullptr);
+            vkDestroySurfaceKHR(vkInstance, vulkanSurface, nullptr);
             vulkanSurface = nullptr;
         }
 
-        if(vulkanInstance)
-        {
-            vkDestroyInstance(vulkanInstance, nullptr);
-            vulkanInstance = nullptr;
-        }
+        VkUtil::DestroyVulkanInstance(&vkInstance);
     }
     
 } // namespace VkApplication

@@ -1,11 +1,13 @@
 #pragma once
 
 #include "Common.h"
+#include <vector>
+#include <array>
 
     // Type Declaration
 #define INVALID_QUEUE_FAMILY_HANDLE -1
 
-namespace Vk
+namespace VkUtil
 {
     namespace Types
     {
