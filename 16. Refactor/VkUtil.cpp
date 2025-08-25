@@ -18,6 +18,34 @@ namespace VkUtil
 
 
     // Function Definition
+        /**
+     * @brief ReadFile()
+     */
+    static bool ReadFile(const std::string& filename, /* _Out_ */ std::vector<char>& out_data)
+    {
+        // code
+        std::ifstream file(filename, std::ios::ate /* Start reading at the end of the file */ | std::ios::binary /* Read the file as binary file */);
+
+        if(!file.is_open())
+        {
+            LogError("[Error] Failed to open file '%s'.", filename.c_str());
+            return false;
+        }
+
+        size_t fileSize = (size_t) file.tellg();
+
+        out_data.clear();
+        out_data.resize(fileSize);
+
+        // seek to the beaginning of the file
+        file.seekg(0);
+        file.read(out_data.data(), fileSize);
+
+        file.close();
+
+        return true;
+    }
+
     /**
      * @brief GetVulkanSupportedInstanceExtensions()
      *          Get Vulkan instance supported extensions.
@@ -135,29 +163,6 @@ namespace VkUtil
     }
 
     /**
-     * @brief FindVulkanMemoryType()
-     */
-    uint32_t FindMemoryType(VkPhysicalDevice vkPhysicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties)
-    {
-        // code
-        // Get available types of memory.
-        VkPhysicalDeviceMemoryProperties memProperties{};
-        vkGetPhysicalDeviceMemoryProperties(vkPhysicalDevice, &memProperties);
-
-        for(uint32_t i = 0; i < memProperties.memoryTypeCount; ++i)
-        {
-            if( (typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
-            {
-                return i;
-            }
-        }
-
-        LogError("Failed To Find Suitable memory type.");
-        return -1;
-    }
-
-
-    /**
      * @brief VulkanDebugCallback()
      *              Vulkan debug call signature => PFN_vkDebugUtilsMessengerCallbackEXT
      * 
@@ -202,6 +207,28 @@ namespace VkUtil
         }
 
         return VK_FALSE;
+    }
+
+    /**
+     * @brief FindVulkanMemoryType()
+     */
+    uint32_t FindMemoryType(VkPhysicalDevice vkPhysicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties)
+    {
+        // code
+        // Get available types of memory.
+        VkPhysicalDeviceMemoryProperties memProperties{};
+        vkGetPhysicalDeviceMemoryProperties(vkPhysicalDevice, &memProperties);
+
+        for(uint32_t i = 0; i < memProperties.memoryTypeCount; ++i)
+        {
+            if( (typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
+            {
+                return i;
+            }
+        }
+
+        LogError("Failed To Find Suitable memory type.");
+        return -1;
     }
 
     /**
@@ -459,29 +486,24 @@ namespace VkUtil
     }
 
     /**
-     * @brief ReadFile()
+     * @brief CreateVulkanSurface()
      */
-    static bool ReadFile(const std::string& filename, /* _Out_ */ std::vector<char>& out_data)
+    bool CreateVulkanSurface(VkInstance vkInstance, HWND windowHandle, VkSurfaceKHR *pSurface)
     {
         // code
-        std::ifstream file(filename, std::ios::ate /* Start reading at the end of the file */ | std::ios::binary /* Read the file as binary file */);
+        VkWin32SurfaceCreateInfoKHR win32SurfaceCreateInfo{};
+        win32SurfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+        win32SurfaceCreateInfo.hwnd = windowHandle;
+        win32SurfaceCreateInfo.hinstance = GetModuleHandle(nullptr);
 
-        if(!file.is_open())
+        VkResult errorCode = vkCreateWin32SurfaceKHR(vkInstance, &win32SurfaceCreateInfo, nullptr, pSurface);
+        if(errorCode != VK_SUCCESS)
         {
-            LogError("[Error] Failed to open file '%s'.", filename.c_str());
+            LogError("Vulkam: [Error] vkCreateWin32SurfaceKHR() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
             return false;
         }
 
-        size_t fileSize = (size_t) file.tellg();
-
-        out_data.clear();
-        out_data.resize(fileSize);
-
-        // seek to the beaginning of the file
-        file.seekg(0);
-        file.read(out_data.data(), fileSize);
-
-        file.close();
+        // LogSuccess("Vulkan: [Success] Vulkan Surface Create Successfully.");
 
         return true;
     }

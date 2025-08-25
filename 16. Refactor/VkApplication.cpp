@@ -180,29 +180,6 @@ namespace VkApplication
     }
 
     /**
-     * @brief CreateVulkanSurface()
-     */
-    static bool CreateVulkanSurface(HWND windowHandle)
-    {
-        // code
-        VkWin32SurfaceCreateInfoKHR win32SurfaceCreateInfo{};
-        win32SurfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-        win32SurfaceCreateInfo.hwnd = windowHandle;
-        win32SurfaceCreateInfo.hinstance = GetModuleHandle(nullptr);
-
-        VkResult errorCode = vkCreateWin32SurfaceKHR(vkInstance, &win32SurfaceCreateInfo, nullptr, &vulkanSurface);
-        if(errorCode != VK_SUCCESS)
-        {
-            LogError("Vulkam: [Error] vkCreateWin32SurfaceKHR() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
-        LogSuccess("Vulkan: [Success] Vulkan Surface Create Successfully.");
-
-        return true;
-    }
-
-    /**
      * @brief FindQueueFamilies()
      */
     static VkUtil::Types::QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device)
@@ -1395,7 +1372,7 @@ namespace VkApplication
         CHECK_FUNCTION_RETURN(VkUtil::CreateVulkanInstance(vulkanRequiredInstanceLayers.data(), vulkanRequiredInstanceLayers.size(), vulkanRequiredInstanceExtesion.data(), (uint32_t)vulkanRequiredInstanceExtesion.size(), VK_ENABLE_VALIDATION_LAYER, &vkInstance));
 
         // Create Surface
-        CHECK_FUNCTION_RETURN(CreateVulkanSurface(windowHandle));
+        CHECK_FUNCTION_RETURN(VkUtil::CreateVulkanSurface(vkInstance, windowHandle, &vulkanSurface));
 
         // Select Physical Device
         CHECK_FUNCTION_RETURN(SelectVulkanPhysicalDevice());

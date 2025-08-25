@@ -35,6 +35,11 @@ namespace VkUtil
     void DestroyVulkanInstance(VkInstance *instance);
 
     /**
+     * @brief CreateVulkanSurface()
+     */
+    bool CreateVulkanSurface(VkInstance vkInstance, HWND windowHandle, VkSurfaceKHR *pSurface);
+
+    /**
      * @brief CreateVkShaderModuleFromFile()
     */
     VkShaderModule CreateVkShaderModuleFromFile(VkDevice vkDevice, const std::string& filename);
