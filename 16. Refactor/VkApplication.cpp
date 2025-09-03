@@ -130,398 +130,6 @@ namespace VkApplication
     };
 
 // ====================================================== Function Definition Begin ====================================================== //
-
-    /**
-     * @brief LogSwapChainSupportDetails()
-     */
-    static void LogSwapChainSupportDetails(VkUtil::Types::SwapChainSupportDetails& details)
-    {
-        // code
-        std::string log_string;
-
-        // Capabilities
-        log_string += "Swap Chain Capabilities: \n";
-        log_string = log_string + "\tMinimum Image Count       :- "  +  std::to_string(details.capabilities.minImageCount) + "\n";
-        log_string = log_string + "\tMaximum Image Count       :- "  +  std::to_string(details.capabilities.maxImageCount) + "\n";
-        log_string = log_string + "\tCurrent Extent            :- [" +  std::to_string(details.capabilities.currentExtent.width) + ", " +
-                                                                         std::to_string(details.capabilities.currentExtent.height) + "]\n";
-        log_string = log_string + "\tMin Image Extent          :- ["  +  std::to_string(details.capabilities.minImageExtent.width) + ", " +
-                                                                         std::to_string(details.capabilities.minImageExtent.height) + "]\n";
-        log_string = log_string + "\tMax Image Extent          :- ["  +  std::to_string(details.capabilities.maxImageExtent.width) + ", " +
-                                                                         std::to_string(details.capabilities.maxImageExtent.height) + "]\n";
-        log_string = log_string + "\tMax Image Array Layers    :- "   +  std::to_string(details.capabilities.maxImageArrayLayers) + "\n";
-        log_string = log_string + "\tSupported Transforms      :- \n"   +  VulkanHelper::GetVkSurfaceTransformsFlagString(details.capabilities.supportedTransforms) + "\n";
-        log_string = log_string + "\tCurrent Transforms        :- \n"   +  VulkanHelper::GetVkSurfaceTransformsFlagString(details.capabilities.currentTransform) + "\n";
-        log_string = log_string + "\tSupported Composite Alpha :- \n"   +  VulkanHelper::GetVkCompositeAlphaFlagString(details.capabilities.supportedCompositeAlpha) + "\n";
-        log_string = log_string + "\tSupported Image Usage     :- \n"   +  VulkanHelper::GetVkImageUsageFlagsString(details.capabilities.supportedUsageFlags) + "\n";
-
-        // Formats
-        log_string = log_string + "\n";
-        log_string = log_string + "\tSurface Formats    :-\n";
-        int index = 0;
-        for(VkSurfaceFormatKHR& format : details.formats)
-        {
-            log_string = log_string + "\t" + std::to_string(index);
-            log_string = log_string + "\tFormat     = " + VulkanHelper::GetVkFormatString(format.format) + "\n";
-            log_string = log_string + "\t\tColorSpace = " + VulkanHelper::GetVkColorSpaceString(format.colorSpace) + "\n\n";
-
-            index++;
-        }
-
-        // Present Mode
-        log_string = log_string + "\n";
-        log_string = log_string + "\tPresent Modes    :-\n";
-        for(VkPresentModeKHR& presentMode : details.presentModes)
-        {
-            log_string = log_string + "\t\t" + VulkanHelper::GetVkPresentModeString(presentMode) + "\n";
-        }
-
-        Log("Swap Chain Details: \n%s", log_string.c_str());
-    }
-
-    /**
-     * @brief FindQueueFamilies()
-     */
-    static VkUtil::Types::QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device)
-    {
-        // code
-        VkUtil::Types::QueueFamilyIndices queueIndices;
-
-        uint32_t queueFamilyCount = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
-
-        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
-
-        int i = 0;
-        for(const VkQueueFamilyProperties& queueFamily : queueFamilies)
-        {
-            // Check if Device has Graphics queue, .
-            if(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
-            {
-                queueIndices.graphicsFamily = i;
-            }
-
-            if(!(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
-               (queueFamily.queueFlags & VK_QUEUE_TRANSFER_BIT))
-            {
-                queueIndices.transferFamily = i;
-            }
-
-            // Check if device support surface presentation.
-            VkBool32 presentSupport = false;
-            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, vulkanSurface, &presentSupport);
-            if(presentSupport)
-            {
-                queueIndices.presentFamily = i;
-            }
-
-            if(queueIndices.IsComplete())
-            {
-                LogInfo("Graphics Queue Family Index: %u", queueIndices.graphicsFamily);
-                LogInfo("Present Queue Family Index: %u", queueIndices.presentFamily);
-                LogInfo("Transfer Queue Family Index: %u", queueIndices.transferFamily);
-                break;
-            }
-
-            ++i;
-        }
-
-        return queueIndices;
-    }
-
-    /**
-     * @brief CheckDeviceExtensionSupport()
-     */
-    static bool CheckDeviceExtensionSupport(VkPhysicalDevice device)
-    {
-        // code
-        uint32_t extensionCount = 0;
-        VkResult errorCode = vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
-        if(errorCode != VK_SUCCESS)
-        {
-            LogError("Vulkan: [Error] vkEnumerateDeviceExtensionProperties() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
-        std::vector<VkExtensionProperties> availableExtensions(extensionCount);
-        errorCode = vkEnumerateDeviceExtensionProperties( device, nullptr, &extensionCount, availableExtensions.data());
-        if(errorCode != VK_SUCCESS)
-        {
-            LogError("Vulkan: [Error] vkEnumerateDeviceExtensionProperties() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
-        std::set<std::string> requiredExtensions(vulkanRequiredDeviceExtensions.begin(), vulkanRequiredDeviceExtensions.end());
-
-        for(const VkExtensionProperties& extension : availableExtensions)
-        {
-            // LogInfo("%s", extension.extensionName);
-            requiredExtensions.erase(extension.extensionName);
-        }
-
-        return requiredExtensions.empty();
-    }
-
-    /**
-     * @brief QuerySwapChainSupport()
-     */
-    static VkUtil::Types::SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device)
-    {
-        // code
-        VkUtil::Types::SwapChainSupportDetails details;
-
-        // Query Surface Capabilities
-        VkResult errorCode = vkGetPhysicalDeviceSurfaceCapabilitiesKHR( device, vulkanSurface, &details.capabilities);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkGetPhysicalDeviceSurfaceCapabililtiesKHR() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return VkUtil::Types::SwapChainSupportDetails();
-        }
-
-        // Querying Supported surface formats.
-        uint32_t formatCount = 0;
-        vkGetPhysicalDeviceSurfaceFormatsKHR(device, vulkanSurface, &formatCount, nullptr);
-
-        if(formatCount != 0)
-        {
-            details.formats.resize(formatCount);
-            vkGetPhysicalDeviceSurfaceFormatsKHR(device, vulkanSurface, &formatCount, details.formats.data());
-        }
-
-        // Querying Present Modes
-        uint32_t presentModeCount = 0;
-        vkGetPhysicalDeviceSurfacePresentModesKHR( device, vulkanSurface, &presentModeCount, nullptr);
-        if(presentModeCount != 0)
-        {
-            details.presentModes.resize(presentModeCount);
-            vkGetPhysicalDeviceSurfacePresentModesKHR(device, vulkanSurface, &presentModeCount, details.presentModes.data());
-        }
-
-        LogSwapChainSupportDetails(details);
-
-        return details;
-    }
-
-    /**
-     * @brief IsPhysicalDeviceSuitable()
-     *              Check whether device is suitable for the operations we want to perform.
-     */
-    static bool IsPhysicalDeviceSuitable(VkPhysicalDevice device)
-    {
-        // code
-#if 0
-            // Get Physical Device Details.
-        VkPhysicalDeviceProperties deviceProperties;
-        vkGetPhysicalDeviceProperties(device, &deviceProperties);
-
-        VkPhysicalDeviceFeatures deviceFeatures;
-        vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
-
-        // Let's consider our application only usable for dedicated graphics card that support geometry shaders.
-        return (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) && deviceFeatures.geometryShader;
-#else
-        VkUtil::Types::QueueFamilyIndices indices = FindQueueFamilies(device);
-
-        bool extensionSupported = CheckDeviceExtensionSupport(device);
-
-        bool swapChainAdequate = false;
-        if(extensionSupported)
-        {
-            // For now Swap chain support if sufficient if there is at least one supported image format
-            // and one supported presentation mode given the window surface we have.
-            VkUtil::Types::SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(device);
-            swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
-        }
-
-        return indices.IsComplete() && extensionSupported && swapChainAdequate;
-#endif
-    }
-
-    /**
-     * @brief PickVulkanPhysicalDevice()
-     */
-    static bool SelectVulkanPhysicalDevice()
-    {
-        // code
-            // Listing the graphics cards.
-        uint32_t deviceCount = 0;
-        VkResult vulkanErrorCode = vkEnumeratePhysicalDevices(vkInstance, &deviceCount, nullptr);
-        if(deviceCount == 0)
-        {
-            LogError("Vulkan [Error]: Failed to find GPUs with Vulkan Support!");
-            return false;
-        }
-
-        std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
-        vulkanErrorCode = vkEnumeratePhysicalDevices(vkInstance, &deviceCount, physicalDevices.data());
-        if(vulkanErrorCode)
-        {
-            LogError("Vulkan [Error]: vkEnumeratePhysicalDevices() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
-            return false;
-        }
-
-        // Print Device Informations
-        std::string device_details_log;
-
-        int index = 1;
-        for(const VkPhysicalDevice& device : physicalDevices)
-        {
-            VkPhysicalDeviceProperties deviceProperties{};
-            vkGetPhysicalDeviceProperties(device, &deviceProperties);
-
-            std::string deviceType;
-            switch(deviceProperties.deviceType)
-            {
-                case VK_PHYSICAL_DEVICE_TYPE_OTHER:             deviceType = "OTHER";           break;
-                case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:    deviceType = "INTEGRATED GPU";  break;
-                case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:      deviceType = "DISCRETE GPU";    break;
-                case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:       deviceType = "VIRTUAL GPU";     break;
-                case VK_PHYSICAL_DEVICE_TYPE_CPU:               deviceType = "CPU";             break;
-            }
-
-            device_details_log += std::to_string(index) + ".\n";
-            device_details_log = device_details_log + "\t\tDevice Name:    " + deviceProperties.deviceName + "\n";
-            device_details_log = device_details_log + "\t\tDevice Type:    " + deviceType + "\n";
-
-            char hexVenderID[16]{};
-            sprintf(hexVenderID, "0x%X", deviceProperties.vendorID);
-
-            char hexDeviceID[16]{};
-            sprintf(hexDeviceID, "0x%X", deviceProperties.deviceID);
-
-            device_details_log = device_details_log + "\t\tVender ID:      " + hexVenderID + "\n";
-            device_details_log = device_details_log + "\t\tDevice ID:      " + hexDeviceID + "\n";
-            device_details_log = device_details_log + "\t\tAPI Version:    " + 
-                std::to_string(VK_API_VERSION_MAJOR(deviceProperties.apiVersion)) + "." +
-                std::to_string(VK_API_VERSION_MINOR(deviceProperties.apiVersion)) + "." +
-                std::to_string(VK_API_VERSION_PATCH(deviceProperties.apiVersion)) + "\n";
-            device_details_log = device_details_log + "\t\tDriver Version: " +
-                std::to_string( deviceProperties.driverVersion >> 22) + "." +           // Major Version
-                std::to_string((deviceProperties.driverVersion >> 12) & 0x3ff) + "." +  // Minor Version
-                std::to_string( deviceProperties.driverVersion & 0xfff) + "\n";         // Patch
-            device_details_log += "\n";
-
-            index++;
-        }
-
-        Log("\nPhysical Device Properties:\n%s", device_details_log.c_str());
-        device_details_log.clear();
-
-        // Pick Physical Device
-        for(const VkPhysicalDevice& device : physicalDevices)
-        {
-            if(IsPhysicalDeviceSuitable(device))
-            {
-                VkPhysicalDeviceProperties deviceProperties{};
-                vkGetPhysicalDeviceProperties(device, &deviceProperties);
-
-                LogInfo("Vulkan: Selected Physical Device Name - \"%s\"", deviceProperties.deviceName);
-
-                vulkanPhysicalDevice = device;
-
-                // Get Queue Family Indices for selected device
-                vulkanSelectedPhysicalDeviceQueueFamily = FindQueueFamilies(vulkanPhysicalDevice);
-                break;
-            }
-        }
-
-        if(vulkanPhysicalDevice == VK_NULL_HANDLE)
-        {
-            LogError("Vulkan [Error]: Failed to find suitable GPI!!!");
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * @brief CreateVulkanLogicalDevice()
-     */
-    static bool CreateVulkanLogicalDevice()
-    {
-        // code
-        ///////////////// Specifying the queues to be created.
-#if 0
-            // 'VkDeviceQueueCreateInfo' this structure describes the number of queues we want for a single family.
-
-            // Graphics Queue
-        VkDeviceQueueCreateInfo graphicsQueueCreateInfo{};
-        graphicsQueueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        graphicsQueueCreateInfo.queueFamilyIndex = indices.graphicsFamily;
-        graphicsQueueCreateInfo.queueCount = 1; // Number of graphics queues we want
-            // vulkan lets you assign priorities to queues to influence the scheduling of command buffer execution using floating
-            // point number between 0.0 and 1.0. This is required even if there is only a single queue.
-        float queuePriorities = 1.0f;
-        graphicsQueueCreateInfo.pQueuePriorities = &queuePriorities;
-
-            // Presentation Queue
-        VkDeviceQueueCreateInfo presentationQueueCreateInfo{};
-        presentationQueueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        presentationQueueCreateInfo.queueFamilyIndex = indices.presentFamily;
-        presentationQueueCreateInfo.queueCount = 1; // Number of presentation queues we want
-        presentationQueueCreateInfo.pQueuePriorities = &queuePriorities;
-#else
-        // VkDeviceQueueCreateInfo::queueFamilyIndex must be unique
-        std::set<uint32_t> uniqueQueueFamilies = {
-            vulkanSelectedPhysicalDeviceQueueFamily.graphicsFamily,
-            vulkanSelectedPhysicalDeviceQueueFamily.presentFamily,
-            vulkanSelectedPhysicalDeviceQueueFamily.transferFamily
-        };
-
-        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-        float queuePriority = 1.0f;
-
-        for(uint32_t queueFamily : uniqueQueueFamilies)
-        {
-            VkDeviceQueueCreateInfo queueCreateInfo{};
-            queueCreateInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-            queueCreateInfo.queueFamilyIndex = queueFamily;
-            queueCreateInfo.queueCount       = 1;
-            queueCreateInfo.pQueuePriorities = &queuePriority;
-
-            queueCreateInfos.push_back(queueCreateInfo);
-        }
-#endif
-
-        ///////////////// Specifying set of device features that we'll be using.
-            // Right Now we don't need anythi special, so we can simply defint it and leave everyting to VK_FALSE.
-        VkPhysicalDeviceFeatures deviceFeatures{};
-
-        ///////////////// Creating the logical device
-        VkDeviceCreateInfo deviceCreateInfo{};
-        deviceCreateInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-
-        deviceCreateInfo.pQueueCreateInfos       = queueCreateInfos.data();
-        deviceCreateInfo.queueCreateInfoCount    = static_cast<uint32_t>(queueCreateInfos.size());
-
-        deviceCreateInfo.pEnabledFeatures        = &deviceFeatures;
-
-        deviceCreateInfo.enabledExtensionCount   = static_cast<uint32_t>(vulkanRequiredDeviceExtensions.size());
-        deviceCreateInfo.ppEnabledExtensionNames = vulkanRequiredDeviceExtensions.data();
-
-        uint32_t layerCount = 0;
-        const char** supportedInstanceLayers = VkUtil::GetVulkanInstanceSupportedLayers(&layerCount);
-        deviceCreateInfo.enabledLayerCount       = layerCount;
-        deviceCreateInfo.ppEnabledLayerNames     = supportedInstanceLayers;
-
-        VkResult errorCode = vkCreateDevice(vulkanPhysicalDevice /* Device to interface with */, &deviceCreateInfo, nullptr, &vulkanLogicalDevice);
-        if(errorCode != VK_SUCCESS)
-        {
-            LogError("Vulkan: [Error] vkCreateDevice() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
-        ///////////////// Retrieving Queue Handles
-        vkGetDeviceQueue(vulkanLogicalDevice, vulkanSelectedPhysicalDeviceQueueFamily.graphicsFamily, 0, &vulkanGraphicsQueue);
-        vkGetDeviceQueue(vulkanLogicalDevice, vulkanSelectedPhysicalDeviceQueueFamily.presentFamily, 0, &vulkanPresentationQueue);
-        vkGetDeviceQueue(vulkanLogicalDevice, vulkanSelectedPhysicalDeviceQueueFamily.transferFamily, 0, &vulkanTransferQueue);
-
-        LogSuccess("Vulkan: [Success] Vulkan Device And Queue Create Successfully.");
-
-        return true;
-    }
-
     /**
      * @brief ChooseSwapSurfaceFormat()
      */
@@ -595,7 +203,7 @@ namespace VkApplication
     static bool CreateVulkanSwapChain()
     {
         // code
-        VkUtil::Types::SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(vulkanPhysicalDevice);
+        VkUtil::Types::SwapChainSupportDetails swapChainSupport = VkCustomAPI::GetSwapChainSupportDetails(vulkanPhysicalDevice, vulkanSurface);
 
         VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.formats);
         VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.presentModes);
@@ -661,13 +269,7 @@ namespace VkApplication
 
         swapChainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
 
-        VkResult errorCode = vkCreateSwapchainKHR( vulkanLogicalDevice, &swapChainCreateInfo, nullptr, &vulkanSwapChain);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkCreateSwapchainKHR() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateSwapchainKHR( vulkanLogicalDevice, &swapChainCreateInfo, nullptr, &vulkanSwapChain), false);
         LogSuccess("Vulkan: [Success] Vulkan SwapChain Create Successfully.");
 
         // Retrieving the swap chain images.
@@ -731,12 +333,7 @@ namespace VkApplication
             imageViewCreateInfo.subresourceRange.layerCount = 1;
 
             // Create Image View.
-            VkResult errorCode = vkCreateImageView(vulkanLogicalDevice, &imageViewCreateInfo, nullptr, &vulkanSwapChainImageViews[imageIndex]);
-            if(errorCode)
-            {
-                LogError("Vulkan: [Error] vkCreateImageView() Failed for %d. %s", imageIndex, VulkanHelper::GetVulkanErrorCodeString(errorCode));
-                return false;
-            }
+            VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateImageView(vulkanLogicalDevice, &imageViewCreateInfo, nullptr, &vulkanSwapChainImageViews[imageIndex]), false);
         }
 
         LogSuccess("Vulkan: [Success] VkImageView created for swap chain images.");
@@ -820,13 +417,7 @@ namespace VkApplication
         renderPassCreateInfo.pDependencies = &subpassDependency;
 #endif
 
-        VkResult errorCode = vkCreateRenderPass( vulkanLogicalDevice, &renderPassCreateInfo, nullptr, &vulkanRenderPass);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkCreateRenderPass() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateRenderPass( vulkanLogicalDevice, &renderPassCreateInfo, nullptr, &vulkanRenderPass), false);
         LogSuccess("Vulkan: [Success] Vulkan Graphics Render Pass Created.");
 
         return true;
@@ -850,13 +441,7 @@ namespace VkApplication
         layoutInfo.bindingCount = 1;
         layoutInfo.pBindings = &uboLayoutBinding;
         
-        VkResult errorCode = vkCreateDescriptorSetLayout( vulkanLogicalDevice, &layoutInfo, nullptr, &vulkanDescriptorSetLayout);
-        if(errorCode != VK_SUCCESS)
-        {
-            LogError("[Error] Failed to create descriptor set layout. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateDescriptorSetLayout( vulkanLogicalDevice, &layoutInfo, nullptr, &vulkanDescriptorSetLayout), false);
         return true;
     }
 
@@ -1058,12 +643,7 @@ namespace VkApplication
         pipelineLayoutCreateInfo.pushConstantRangeCount = 1;    // Optional
         pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange; // Optional
 
-        VkResult errorCode = vkCreatePipelineLayout(vulkanLogicalDevice, &pipelineLayoutCreateInfo, nullptr, &vulkanPipelineLayout);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkCreatePipelineLayput() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreatePipelineLayout(vulkanLogicalDevice, &pipelineLayoutCreateInfo, nullptr, &vulkanPipelineLayout), false);
 
 ////////////// Create Graphics Pipeline
         VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo{};
@@ -1093,12 +673,7 @@ namespace VkApplication
         graphicsPipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
         graphicsPipelineCreateInfo.basePipelineIndex = -1;
 
-        errorCode = vkCreateGraphicsPipelines( vulkanLogicalDevice, VK_NULL_HANDLE, 1, &graphicsPipelineCreateInfo, nullptr, &vulkanGraphicsPipeline);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkCreateGraphicsPipelines() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateGraphicsPipelines( vulkanLogicalDevice, VK_NULL_HANDLE, 1, &graphicsPipelineCreateInfo, nullptr, &vulkanGraphicsPipeline), false);
 
         // Destroy Shader Module
         vkDestroyShaderModule( vulkanLogicalDevice, fragmentShaderModule, nullptr);
@@ -1126,19 +701,9 @@ namespace VkApplication
         // Iterate through the image views and create framebuffers from them:
         for(size_t i = 0; i < vulkanSwapChainImageViews.size(); ++i)
         {
-            VkFramebufferCreateInfo framebufferCreateInfo{};
-            framebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-            framebufferCreateInfo.renderPass = vulkanRenderPass;
-            framebufferCreateInfo.attachmentCount = 1;
-            framebufferCreateInfo.pAttachments = &vulkanSwapChainImageViews[i];
-            framebufferCreateInfo.width = vulkanSwapChainExtent.width;
-            framebufferCreateInfo.height = vulkanSwapChainExtent.height;
-            framebufferCreateInfo.layers = 1;
-
-            VkResult errorCode = vkCreateFramebuffer( vulkanLogicalDevice, &framebufferCreateInfo, nullptr, &vulkanSwapchainFramebuffers[i]);
-            if(errorCode)
+            if(!VkUtil::CreateVkFramebuffer(vulkanLogicalDevice, vulkanRenderPass, 1, &vulkanSwapChainImageViews[i], vulkanSwapChainExtent.width, vulkanSwapChainExtent.height, 1, &vulkanSwapchainFramebuffers[i]))
             {
-                LogError("Vulkan: [Error] vkCreateFramebuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+                LogError("Vulkan: [Error] VkUtil::CreateVkFramebuffer() Failed. ");
                 return false;
             }
         }
@@ -1163,30 +728,13 @@ namespace VkApplication
             // immediately since the fence is already signaled.
         fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-        VkResult errorCode;
-
         for( uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {
-            errorCode = vkCreateSemaphore(vulkanLogicalDevice, &semaphoreCreateInfo, nullptr, &imageAvailableSemaphores[i]);
-            if(errorCode)
-            {
-                LogError("Vulkan: [Error] vkCreateSemaphore() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-                return false;
-            }
+            VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateSemaphore(vulkanLogicalDevice, &semaphoreCreateInfo, nullptr, &imageAvailableSemaphores[i]), false);
 
-            errorCode = vkCreateSemaphore(vulkanLogicalDevice, &semaphoreCreateInfo, nullptr, &renderFinishedSemaphores[i]);
-            if(errorCode)
-            {
-                LogError("Vulkan: [Error] vkCreateSemaphore() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-                return false;
-            }
+            VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateSemaphore(vulkanLogicalDevice, &semaphoreCreateInfo, nullptr, &renderFinishedSemaphores[i]), false);
 
-            errorCode = vkCreateFence(vulkanLogicalDevice, &fenceCreateInfo, nullptr, &inFlightFences[i]);
-            if(errorCode)
-            {
-                LogError("Vulkan: [Error] vkCreateFence() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-                return false;
-            }
+            VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateFence(vulkanLogicalDevice, &fenceCreateInfo, nullptr, &inFlightFences[i]), false);
         }
         
         return true;
@@ -1295,13 +843,7 @@ namespace VkApplication
         poolInfo.pPoolSizes = &poolSize;
         poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
-        VkResult errorCode = vkCreateDescriptorPool(vulkanLogicalDevice, &poolInfo, nullptr, &vulkanDescriptorPool);
-        if(errorCode)
-        {
-            LogError("[Error] vkCreateDescriptorPool() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateDescriptorPool(vulkanLogicalDevice, &poolInfo, nullptr, &vulkanDescriptorPool), false);
         return true;
     }
 
@@ -1323,12 +865,7 @@ namespace VkApplication
         allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
         allocInfo.pSetLayouts = layouts;
         
-        VkResult errorCode = vkAllocateDescriptorSets(vulkanLogicalDevice, &allocInfo, vulkanDescriptorSets);
-        if(errorCode)
-        {
-            Log("vkAllocateDescriptorSets() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkAllocateDescriptorSets(vulkanLogicalDevice, &allocInfo, vulkanDescriptorSets), false);
 
         // Configure Desciptor
         for( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
@@ -1366,19 +903,25 @@ namespace VkApplication
         }
 
         // code
-        VkResult vulkanErrorCode;
-
         // Create Vulkan Instance
         CHECK_FUNCTION_RETURN(VkUtil::CreateVulkanInstance(vulkanRequiredInstanceLayers.data(), vulkanRequiredInstanceLayers.size(), vulkanRequiredInstanceExtesion.data(), (uint32_t)vulkanRequiredInstanceExtesion.size(), VK_ENABLE_VALIDATION_LAYER, &vkInstance));
 
         // Create Surface
         CHECK_FUNCTION_RETURN(VkUtil::CreateVulkanSurface(vkInstance, windowHandle, &vulkanSurface));
 
-        // Select Physical Device
-        CHECK_FUNCTION_RETURN(SelectVulkanPhysicalDevice());
+        // Get Physical Device
+        VkCustomAPI::LogVulkanPhysicalDevicesInfo(vkInstance);
+        CHECK_FUNCTION_RETURN(VkCustomAPI::GetVulkanPhysicalDevice(vkInstance, vulkanSurface, vulkanRequiredDeviceExtensions, &vulkanPhysicalDevice, &vulkanSelectedPhysicalDeviceQueueFamily));
 
         // Setup Logical Device
-        CHECK_FUNCTION_RETURN(CreateVulkanLogicalDevice());
+        CHECK_FUNCTION_RETURN(VkCustomAPI::CreateVulkanLogicalDevice(vulkanPhysicalDevice, vulkanSelectedPhysicalDeviceQueueFamily, vulkanRequiredDeviceExtensions, &vulkanLogicalDevice));
+
+        ///////////////// Retrieving Queue Handles
+        vkGetDeviceQueue(vulkanLogicalDevice, vulkanSelectedPhysicalDeviceQueueFamily.graphicsFamily, 0, &vulkanGraphicsQueue);
+        vkGetDeviceQueue(vulkanLogicalDevice, vulkanSelectedPhysicalDeviceQueueFamily.presentFamily, 0, &vulkanPresentationQueue);
+        vkGetDeviceQueue(vulkanLogicalDevice, vulkanSelectedPhysicalDeviceQueueFamily.transferFamily, 0, &vulkanTransferQueue);
+
+        LogSuccess("Vulkan: [Success] Vulkan Device And Queue Create Successfully.");
 
         return true;
 
@@ -1398,8 +941,6 @@ namespace VkApplication
         }
 
         // code
-        VkResult vulkanErrorCode;
-
         // Initialize Vulkan
         CHECK_FUNCTION_RETURN(InitializeVulkan(hwnd));
 
@@ -1541,12 +1082,7 @@ namespace VkApplication
         beginInfo.pInheritanceInfo = nullptr;   // Optional
 
         // If the command buffer was already recorded once, then a call to vkBeginCommandBuffer() will implicitly reset it.
-        VkResult errorCode = vkBeginCommandBuffer( commandBuffer, &beginInfo);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkBeginCommandBuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkBeginCommandBuffer( commandBuffer, &beginInfo), false);
 
 ////////////// Starting a render pass
         // Drawing starts by beginning the render pass with vkCmdBeginRenderPass().
@@ -1617,13 +1153,7 @@ namespace VkApplication
         vkCmdEndRenderPass(commandBuffer);
 
         // finish recording the command buffer
-        errorCode = vkEndCommandBuffer(commandBuffer);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkEndCommandBuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkEndCommandBuffer(commandBuffer), false);
         return true;
     }
 
@@ -1709,12 +1239,7 @@ namespace VkApplication
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;    // Specify which semaphores to signal once the command buffer(s) have finished execution.
 
-        VkResult errorCode = vkQueueSubmit( vulkanGraphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkQueueSubmit() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkQueueSubmit( vulkanGraphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]), );
 
 // Presentation
         VkPresentInfoKHR presentInfo{};

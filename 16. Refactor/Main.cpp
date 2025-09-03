@@ -365,7 +365,7 @@ void UnInitialize( void)
 
     //
     VkApplication::Uninitialize();
-    
+
     if(ghdc)
     {
         ReleaseDC( ghwnd, ghdc);

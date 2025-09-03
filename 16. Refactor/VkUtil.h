@@ -4,6 +4,25 @@
 #include "VulkanHelper.h"
 #include "Types.h"
 
+#define VK_UTIL_FN_ERROR_CHECK(x) \
+    {   \
+        VkResult errorCode = x; \
+        if( errorCode != VK_SUCCESS)    \
+        {   \
+            LogError("Vulkan: [Error] " #x " Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));   \
+        }   \
+    }
+
+#define VK_UTIL_FN_ERROR_CHECK_RETURN(x, return_on_failed) \
+    {   \
+        VkResult errorCode = x; \
+        if( errorCode != VK_SUCCESS)    \
+        {   \
+            LogError("Vulkan: [Error] " #x " Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));   \
+            return return_on_failed;    \
+        }   \
+    }
+
 namespace VkUtil
 {
     /**
@@ -68,4 +87,32 @@ namespace VkUtil
      * @brief CreateVkCommandBuffers()
      */
     bool CreateVkCommandBuffers(VkDevice vkDevice, VkCommandPool commandPool, uint32_t bufferCount, VkCommandBuffer *pCommandBuffers);
+
+    /**
+     * @brief CreateVkFramebuffer()
+    */
+    bool CreateVkFramebuffer(VkDevice device, VkRenderPass renderPass, uint32_t attachment_count, VkImageView *pAttachments, uint32_t width, uint32_t height, uint32_t layers, VkFramebuffer *pFramebuffer);
+};
+
+namespace VkCustomAPI
+{
+    /**
+    * @brief: LogVulkanPhysicalDevicesInfo()
+    */
+    void LogVulkanPhysicalDevicesInfo(VkInstance vkInstance);
+
+    /**
+     * @brief GetSwapChainSupportDetails()
+     */
+    VkUtil::Types::SwapChainSupportDetails GetSwapChainSupportDetails(VkPhysicalDevice device, VkSurfaceKHR surface);
+
+    /**
+     * @brief GetVulkanPhysicalDevice()
+     */
+    bool GetVulkanPhysicalDevice(VkInstance vkInstance, VkSurfaceKHR surface, const std::vector<const char*>& vulkanRequiredDeviceExtensions, VkPhysicalDevice *pPhysicalDevice, VkUtil::Types::QueueFamilyIndices *pQueueIndices);
+
+    /**
+     * @brief CreateVulkanLogicalDevice()
+     */
+    bool CreateVulkanLogicalDevice(VkPhysicalDevice physicalDevice, VkUtil::Types::QueueFamilyIndices& queueIndices, const std::vector<const char*>& vulkanRequiredDeviceExtensions, VkDevice *pDevice);
 };

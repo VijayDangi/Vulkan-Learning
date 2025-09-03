@@ -1,6 +1,7 @@
 #include "VkUtil.h"
 
 #include <vector>
+#include <set>
 #include <string>
 #include <fstream>
 
@@ -54,22 +55,12 @@ namespace VkUtil
     {
         // Get Instance Extension Properties Count.
         uint32_t vulkanExtensionCount = 0;
-        VkResult vulkanErrorCode = vkEnumerateInstanceExtensionProperties( nullptr, &vulkanExtensionCount, nullptr);
-        if(vulkanErrorCode)
-        {
-            LogError("Vulkan: Failed to query instance extension properties count: %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
-            return;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkEnumerateInstanceExtensionProperties( nullptr, &vulkanExtensionCount, nullptr),);
 
         // Get Instance Extension Properties.
         vulkanAvailableInstanceExtensionProperties.resize(vulkanExtensionCount);
 
-        vulkanErrorCode = vkEnumerateInstanceExtensionProperties(nullptr, &vulkanExtensionCount, vulkanAvailableInstanceExtensionProperties.data());
-        if(vulkanErrorCode)
-        {
-            LogError("Vulkan: Failed to query instance extensions properties : %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
-            return;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkEnumerateInstanceExtensionProperties(nullptr, &vulkanExtensionCount, vulkanAvailableInstanceExtensionProperties.data()), );
 
         vulkanAvailableInstanceExtensionProperties.resize(vulkanExtensionCount);
 
@@ -96,20 +87,10 @@ namespace VkUtil
         if(vulkanAvailableInstanceLayerProperties.size() == 0)
         {
             uint32_t layerCount = 0;
-            VkResult vulkanErrorCode = vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-            if(vulkanErrorCode)
-            {
-                LogError("Vulkan: Failed to query instance layer properties count: %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
-                return;
-            }
+            VK_UTIL_FN_ERROR_CHECK_RETURN( vkEnumerateInstanceLayerProperties(&layerCount, nullptr), );
 
             vulkanAvailableInstanceLayerProperties.resize(layerCount);
-            vulkanErrorCode = vkEnumerateInstanceLayerProperties(&layerCount, vulkanAvailableInstanceLayerProperties.data());
-            if(vulkanErrorCode)
-            {
-                LogError("Vulkan: Failed to query instance layer properties: %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
-                return;
-            }
+            VK_UTIL_FN_ERROR_CHECK_RETURN( vkEnumerateInstanceLayerProperties(&layerCount, vulkanAvailableInstanceLayerProperties.data()), );
 
             std::string out_string = "\n";
             out_string += "Vulkan Instance Layer Properties: \n";
@@ -416,26 +397,13 @@ namespace VkUtil
             createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT*) &debugMessengerCreateInfo;
         }
 
-        vulkanErrorCode = vkCreateInstance(&createInfo, nullptr, pInstance);
-        if(vulkanErrorCode != VK_SUCCESS)
-        {
-            LogError("vkCreateInstance() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(vulkanErrorCode));
-            return false;
-        }
-        else
-        {
-            LogSuccess(enableValidationLayer ? "vkCreateInstance() Success with Validation Enabled." : "vkCreateInstance() Success with Validation Disabled.");
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateInstance(&createInfo, nullptr, pInstance), false);
+        LogSuccess(enableValidationLayer ? "vkCreateInstance() Success with Validation Enabled." : "vkCreateInstance() Success with Validation Disabled.");
 
         if(enableValidationLayer)
         {
             // setup validation layer debug callback.
-            VkResult errorCode = __vkCreateDebugUtilsMessengerEXT(*pInstance, &debugMessengerCreateInfo, nullptr, &vulkanDebugMessenger);
-            if(errorCode != VK_SUCCESS)
-            {
-                LogError("vkCreateDebugUtilsMessengerEXT() Failed: %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-                return false;
-            }
+            VK_UTIL_FN_ERROR_CHECK_RETURN( __vkCreateDebugUtilsMessengerEXT(*pInstance, &debugMessengerCreateInfo, nullptr, &vulkanDebugMessenger), false);
         }
 
         return true;
@@ -448,7 +416,6 @@ namespace VkUtil
     {
         // code
         *pNumLayers = vulkanAvailableInstanceLayerNames.size();
-
         return vulkanAvailableInstanceLayerNames.data();
     }
 
@@ -459,7 +426,6 @@ namespace VkUtil
     {
         // code
         *pNumExtensions = vulkanAvailableInstanceExtensionNames.size();
-
         return vulkanAvailableInstanceExtensionNames.data();
     }
 
@@ -496,18 +462,12 @@ namespace VkUtil
         win32SurfaceCreateInfo.hwnd = windowHandle;
         win32SurfaceCreateInfo.hinstance = GetModuleHandle(nullptr);
 
-        VkResult errorCode = vkCreateWin32SurfaceKHR(vkInstance, &win32SurfaceCreateInfo, nullptr, pSurface);
-        if(errorCode != VK_SUCCESS)
-        {
-            LogError("Vulkam: [Error] vkCreateWin32SurfaceKHR() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateWin32SurfaceKHR(vkInstance, &win32SurfaceCreateInfo, nullptr, pSurface), false);
         // LogSuccess("Vulkan: [Success] Vulkan Surface Create Successfully.");
-
         return true;
     }
 
+// ================================================================
     /**
      * @brief CreateVkShaderModuleFromFile()
     */
@@ -533,12 +493,7 @@ namespace VkUtil
         shaderModuleCreateInfo.pCode = reinterpret_cast<const uint32_t*>(shader_code.data());
 
         VkShaderModule shaderModule = VK_NULL_HANDLE;
-        VkResult errorCode = vkCreateShaderModule( vkDevice, &shaderModuleCreateInfo, nullptr, &shaderModule);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkCreateShaderModule() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return VK_NULL_HANDLE;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateShaderModule( vkDevice, &shaderModuleCreateInfo, nullptr, &shaderModule), VK_NULL_HANDLE);
 
         return shaderModule;
     }
@@ -562,12 +517,7 @@ namespace VkUtil
         shaderModuleCreateInfo.pCode = reinterpret_cast<const uint32_t*>(shader_code.data());
 
         VkShaderModule shaderModule = VK_NULL_HANDLE;
-        VkResult errorCode = vkCreateShaderModule( vkDevice, &shaderModuleCreateInfo, nullptr, &shaderModule);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkCreateShaderModule() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return VK_NULL_HANDLE;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateShaderModule( vkDevice, &shaderModuleCreateInfo, nullptr, &shaderModule), VK_NULL_HANDLE);
 
         return shaderModule;
     }
@@ -587,12 +537,7 @@ namespace VkUtil
         bufferInfo.queueFamilyIndexCount = numQueueFamily;
         bufferInfo.pQueueFamilyIndices = queueFamilies;
 
-        VkResult errorCode = vkCreateBuffer( vkDevice, &bufferInfo, nullptr, &buffer);
-        if(errorCode != VK_SUCCESS)
-        {
-            LogError("Vulkan: [Error] vkCreateBuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateBuffer( vkDevice, &bufferInfo, nullptr, &buffer), false);
 
         // Memory Requirement
         VkMemoryRequirements memRequirements;
@@ -610,12 +555,7 @@ namespace VkUtil
         }
         allocInfo.memoryTypeIndex = memoryType;
 
-        errorCode = vkAllocateMemory( vkDevice, &allocInfo, nullptr, &bufferMemory);
-        if(errorCode != VK_SUCCESS)
-        {
-            LogError("Vulkan: [Error] vkAllocateBuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkAllocateMemory( vkDevice, &allocInfo, nullptr, &bufferMemory), false);
 
         // Associate Memory with buffer
         vkBindBufferMemory( vkDevice, buffer, bufferMemory, 0);
@@ -697,15 +637,8 @@ namespace VkUtil
         commandPoolCreateInfo.flags = poolCreateFlag;
         commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
 
-        VkResult errorCode = vkCreateCommandPool(vkDevice, &commandPoolCreateInfo, nullptr, out_commandPool);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkCreateCommandPool() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
-
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateCommandPool(vkDevice, &commandPoolCreateInfo, nullptr, out_commandPool), false);
         // LogSuccess("Vulkan: [Success] Vulkan Command Pool Created for QueueFamilyIndex: %u.", queueFamilyIndex);
-
         return true;
     }
 
@@ -724,14 +657,432 @@ namespace VkUtil
         allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocateInfo.commandBufferCount = bufferCount;
 
-        VkResult errorCode = vkAllocateCommandBuffers( vkDevice, &allocateInfo, pCommandBuffers);
-        if(errorCode)
-        {
-            LogError("Vulkan: [Error] vkAllocateCommandBuffers() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkAllocateCommandBuffers( vkDevice, &allocateInfo, pCommandBuffers), false);
 
         // LogSuccess("Vulkan: [Success] Create Command Buffer.");
         return true;
     }
+
+    /**
+     * @brief CreateVkFramebuffer()
+    */
+    bool CreateVkFramebuffer(VkDevice device, VkRenderPass renderPass, uint32_t attachment_count, VkImageView *pAttachments, uint32_t width, uint32_t height, uint32_t layers, VkFramebuffer *pFramebuffer)
+    {
+        // code
+            // The attachments specified during render pass creation are bound by wrapping them into a 'VkFramebuffer' object.
+            // A framebuffer object references all of the 'VkImageView' objects that represent the attachments.
+        // Iterate through the image views and create framebuffers from them:
+        VkFramebufferCreateInfo framebufferCreateInfo{};
+        framebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebufferCreateInfo.renderPass = renderPass;
+        framebufferCreateInfo.attachmentCount = attachment_count;
+        framebufferCreateInfo.pAttachments = pAttachments;
+        framebufferCreateInfo.width = width;
+        framebufferCreateInfo.height = height;
+        framebufferCreateInfo.layers = layers;
+
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateFramebuffer( device, &framebufferCreateInfo, nullptr, pFramebuffer), false);
+
+        return true;
+    }
 };
+
+
+
+// =======================================================//
+// =======================================================//
+// =======================================================//
+namespace VkCustomAPI
+{
+    /**
+    * @brief: LogVulkanPhysicalDevicesInfo()
+    */
+    void LogVulkanPhysicalDevicesInfo(VkInstance vkInstance)
+   {
+        // Listing the graphics cards.
+        uint32_t deviceCount = 0;
+        VkResult vulkanErrorCode = vkEnumeratePhysicalDevices(vkInstance, &deviceCount, nullptr);
+        if(deviceCount == 0)
+        {
+            LogError("Vulkan [Error]: Failed to find GPUs with Vulkan Support!");
+            return;
+        }
+
+        std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkEnumeratePhysicalDevices(vkInstance, &deviceCount, physicalDevices.data()), );
+
+
+        // Print Device Informations
+        std::string device_details_log;
+
+        int index = 1;
+        for(const VkPhysicalDevice& device : physicalDevices)
+        {
+            VkPhysicalDeviceProperties deviceProperties{};
+            vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+            std::string deviceType;
+            switch(deviceProperties.deviceType)
+            {
+                case VK_PHYSICAL_DEVICE_TYPE_OTHER:             deviceType = "OTHER";           break;
+                case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:    deviceType = "INTEGRATED GPU";  break;
+                case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:      deviceType = "DISCRETE GPU";    break;
+                case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:       deviceType = "VIRTUAL GPU";     break;
+                case VK_PHYSICAL_DEVICE_TYPE_CPU:               deviceType = "CPU";             break;
+            }
+
+            device_details_log += std::to_string(index) + ".\n";
+            device_details_log = device_details_log + "\t\tDevice Name:    " + deviceProperties.deviceName + "\n";
+            device_details_log = device_details_log + "\t\tDevice Type:    " + deviceType + "\n";
+
+            char hexVenderID[16]{};
+            sprintf(hexVenderID, "0x%X", deviceProperties.vendorID);
+
+            char hexDeviceID[16]{};
+            sprintf(hexDeviceID, "0x%X", deviceProperties.deviceID);
+
+            device_details_log = device_details_log + "\t\tVender ID:      " + hexVenderID + "\n";
+            device_details_log = device_details_log + "\t\tDevice ID:      " + hexDeviceID + "\n";
+            device_details_log = device_details_log + "\t\tAPI Version:    " + 
+                std::to_string(VK_API_VERSION_MAJOR(deviceProperties.apiVersion)) + "." +
+                std::to_string(VK_API_VERSION_MINOR(deviceProperties.apiVersion)) + "." +
+                std::to_string(VK_API_VERSION_PATCH(deviceProperties.apiVersion)) + "\n";
+            device_details_log = device_details_log + "\t\tDriver Version: " +
+                std::to_string( deviceProperties.driverVersion >> 22) + "." +           // Major Version
+                std::to_string((deviceProperties.driverVersion >> 12) & 0x3ff) + "." +  // Minor Version
+                std::to_string( deviceProperties.driverVersion & 0xfff) + "\n";         // Patch
+            device_details_log += "\n";
+
+            index++;
+        }
+
+        Log("\nPhysical Device Properties:\n%s", device_details_log.c_str());
+        device_details_log.clear();
+   }
+
+    /**
+     * @brief LogSwapChainSupportDetails()
+     */
+    static void LogSwapChainSupportDetails(VkUtil::Types::SwapChainSupportDetails& details, const char *deviceName, VkPhysicalDeviceType deviceType)
+    {
+        // code
+        std::string log_string;
+
+        std::string deviceTypeName;
+        switch(deviceType)
+        {
+            case VK_PHYSICAL_DEVICE_TYPE_OTHER:             deviceTypeName = "OTHER";           break;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:    deviceTypeName = "INTEGRATED GPU";  break;
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:      deviceTypeName = "DISCRETE GPU";    break;
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:       deviceTypeName = "VIRTUAL GPU";     break;
+            case VK_PHYSICAL_DEVICE_TYPE_CPU:               deviceTypeName = "CPU";             break;
+            default:                                        deviceTypeName = "UNKNOWN";         break;
+        }
+        
+        // Capabilities
+        log_string = log_string + "Device Name: " + deviceName + "\n";
+        log_string = log_string + "Device Type: " + deviceTypeName + "\n";
+        log_string += "Swap Chain Capabilities: \n";
+        log_string = log_string + "\tMinimum Image Count       :- "  +  std::to_string(details.capabilities.minImageCount) + "\n";
+        log_string = log_string + "\tMaximum Image Count       :- "  +  std::to_string(details.capabilities.maxImageCount) + "\n";
+        log_string = log_string + "\tCurrent Extent            :- [" +  std::to_string(details.capabilities.currentExtent.width) + ", " +
+                                                                         std::to_string(details.capabilities.currentExtent.height) + "]\n";
+        log_string = log_string + "\tMin Image Extent          :- ["  +  std::to_string(details.capabilities.minImageExtent.width) + ", " +
+                                                                         std::to_string(details.capabilities.minImageExtent.height) + "]\n";
+        log_string = log_string + "\tMax Image Extent          :- ["  +  std::to_string(details.capabilities.maxImageExtent.width) + ", " +
+                                                                         std::to_string(details.capabilities.maxImageExtent.height) + "]\n";
+        log_string = log_string + "\tMax Image Array Layers    :- "   +  std::to_string(details.capabilities.maxImageArrayLayers) + "\n";
+        log_string = log_string + "\tSupported Transforms      :- \n"   +  VulkanHelper::GetVkSurfaceTransformsFlagString(details.capabilities.supportedTransforms) + "\n";
+        log_string = log_string + "\tCurrent Transforms        :- \n"   +  VulkanHelper::GetVkSurfaceTransformsFlagString(details.capabilities.currentTransform) + "\n";
+        log_string = log_string + "\tSupported Composite Alpha :- \n"   +  VulkanHelper::GetVkCompositeAlphaFlagString(details.capabilities.supportedCompositeAlpha) + "\n";
+        log_string = log_string + "\tSupported Image Usage     :- \n"   +  VulkanHelper::GetVkImageUsageFlagsString(details.capabilities.supportedUsageFlags) + "\n";
+
+        // Formats
+        log_string = log_string + "\n";
+        log_string = log_string + "\tSurface Formats    :-\n";
+        int index = 0;
+        for(VkSurfaceFormatKHR& format : details.formats)
+        {
+            log_string = log_string + "\t" + std::to_string(index);
+            log_string = log_string + "\tFormat     = " + VulkanHelper::GetVkFormatString(format.format) + "\n";
+            log_string = log_string + "\t\tColorSpace = " + VulkanHelper::GetVkColorSpaceString(format.colorSpace) + "\n\n";
+
+            index++;
+        }
+
+        // Present Mode
+        log_string = log_string + "\n";
+        log_string = log_string + "\tPresent Modes    :-\n";
+        for(VkPresentModeKHR& presentMode : details.presentModes)
+        {
+            log_string = log_string + "\t\t" + VulkanHelper::GetVkPresentModeString(presentMode) + "\n";
+        }
+
+        Log("Swap Chain Details: \n%s", log_string.c_str());
+    }
+
+    /**
+     * @brief GetQueueFamilies()
+     */
+    static VkUtil::Types::QueueFamilyIndices GetQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface)
+    {
+        // code
+        VkUtil::Types::QueueFamilyIndices queueIndices;
+
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+        int i = 0;
+        for(const VkQueueFamilyProperties& queueFamily : queueFamilies)
+        {
+            // Check if Device has Graphics queue, .
+            if(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            {
+                queueIndices.graphicsFamily = i;
+            }
+
+            if(!(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+               (queueFamily.queueFlags & VK_QUEUE_TRANSFER_BIT))
+            {
+                queueIndices.transferFamily = i;
+            }
+
+            // Check if device support surface presentation.
+            VkBool32 presentSupport = false;
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+            if(presentSupport)
+            {
+                queueIndices.presentFamily = i;
+            }
+
+            if(queueIndices.IsComplete())
+            {
+                LogInfo("Graphics Queue Family Index: %u", queueIndices.graphicsFamily);
+                LogInfo("Present Queue Family Index: %u", queueIndices.presentFamily);
+                LogInfo("Transfer Queue Family Index: %u", queueIndices.transferFamily);
+                break;
+            }
+
+            ++i;
+        }
+
+        return queueIndices;
+    }
+
+    /**
+     * @brief CheckDeviceExtensionSupport()
+     */
+    static bool CheckDeviceExtensionSupport(VkPhysicalDevice device, const std::vector<const char*>& vulkanRequiredDeviceExtensions)
+    {
+        // code
+        uint32_t extensionCount = 0;
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr), false);
+
+        std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkEnumerateDeviceExtensionProperties( device, nullptr, &extensionCount, availableExtensions.data()), false);
+
+        std::set<std::string> requiredExtensions(vulkanRequiredDeviceExtensions.begin(), vulkanRequiredDeviceExtensions.end());
+
+        for(const VkExtensionProperties& extension : availableExtensions)
+        {
+            // LogInfo("%s", extension.extensionName);
+            requiredExtensions.erase(extension.extensionName);
+        }
+
+        return requiredExtensions.empty();
+    }
+
+    /**
+     * @brief GetSwapChainSupportDetails()
+     */
+    VkUtil::Types::SwapChainSupportDetails GetSwapChainSupportDetails(VkPhysicalDevice device, VkSurfaceKHR surface)
+    {
+        // code
+        VkUtil::Types::SwapChainSupportDetails details;
+
+        // Query Surface Capabilities
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkGetPhysicalDeviceSurfaceCapabilitiesKHR( device, surface, &details.capabilities), VkUtil::Types::SwapChainSupportDetails());
+
+        // Querying Supported surface formats.
+        uint32_t formatCount = 0;
+        vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, nullptr);
+
+        if(formatCount != 0)
+        {
+            details.formats.resize(formatCount);
+            vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, details.formats.data());
+        }
+
+        // Querying Present Modes
+        uint32_t presentModeCount = 0;
+        vkGetPhysicalDeviceSurfacePresentModesKHR( device, surface, &presentModeCount, nullptr);
+        if(presentModeCount != 0)
+        {
+            details.presentModes.resize(presentModeCount);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, details.presentModes.data());
+        }
+
+
+        VkPhysicalDeviceProperties deviceProperties{};
+        vkGetPhysicalDeviceProperties(device, &deviceProperties);
+        LogSwapChainSupportDetails(details, deviceProperties.deviceName, deviceProperties.deviceType);
+
+        return details;
+    }
+    
+    /**
+     * @brief IsPhysicalDeviceSuitable()
+     *              Check whether device is suitable for the operations we want to perform.
+     */
+    static bool IsPhysicalDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface, const std::vector<const char*>& vulkanRequiredDeviceExtensions)
+    {
+        // code
+#if 0
+            // Get Physical Device Details.
+        VkPhysicalDeviceProperties deviceProperties;
+        vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+        VkPhysicalDeviceFeatures deviceFeatures;
+        vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+        // Let's consider our application only usable for dedicated graphics card that support geometry shaders.
+        return (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) && deviceFeatures.geometryShader;
+#else
+        VkUtil::Types::QueueFamilyIndices indices = GetQueueFamilies(device, surface);
+
+        bool extensionSupported = CheckDeviceExtensionSupport(device, vulkanRequiredDeviceExtensions);
+
+        bool swapChainAdequate = false;
+        if(extensionSupported)
+        {
+            // For now Swap chain support if sufficient if there is at least one supported image format
+            // and one supported presentation mode given the window surface we have.
+            VkUtil::Types::SwapChainSupportDetails swapChainSupport = GetSwapChainSupportDetails(device, surface);
+            swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
+        }
+
+        return indices.IsComplete() && extensionSupported && swapChainAdequate;
+#endif
+    }
+
+    /**
+     * @brief PickVulkanPhysicalDevice()
+     */
+    bool GetVulkanPhysicalDevice(VkInstance vkInstance, VkSurfaceKHR surface, const std::vector<const char*>& vulkanRequiredDeviceExtensions, VkPhysicalDevice *pPhysicalDevice, VkUtil::Types::QueueFamilyIndices *pQueueIndices)
+    {
+        // code
+            // Listing the graphics cards.
+        uint32_t deviceCount = 0;
+        VkResult vulkanErrorCode = vkEnumeratePhysicalDevices(vkInstance, &deviceCount, nullptr);
+        if(deviceCount == 0)
+        {
+            LogError("Vulkan [Error]: Failed to find GPUs with Vulkan Support!");
+            return false;
+        }
+
+        std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkEnumeratePhysicalDevices(vkInstance, &deviceCount, physicalDevices.data()), false);
+
+        // Pick Physical Device
+        *pPhysicalDevice = VK_NULL_HANDLE;
+
+        for(const VkPhysicalDevice& device : physicalDevices)
+        {
+            if(IsPhysicalDeviceSuitable(device, surface, vulkanRequiredDeviceExtensions))
+            {
+                VkPhysicalDeviceProperties deviceProperties{};
+                vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+                LogInfo("Vulkan: Selected Physical Device Name - \"%s\"", deviceProperties.deviceName);
+
+                *pPhysicalDevice = device;
+
+                // Get Queue Family Indices for selected device
+                *pQueueIndices = GetQueueFamilies(device, surface);
+                break;
+            }
+        }
+
+        if((*pPhysicalDevice) == VK_NULL_HANDLE)
+        {
+            LogError("Vulkan [Error]: Failed to find suitable GPI!!!");
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief CreateVulkanLogicalDevice()
+     */
+    bool CreateVulkanLogicalDevice(VkPhysicalDevice physicalDevice, VkUtil::Types::QueueFamilyIndices& queueIndices, const std::vector<const char*>& vulkanRequiredDeviceExtensions, VkDevice *pDevice)
+    {
+        // code
+        ///////////////// Specifying the queues to be created.
+#if 0
+            // 'VkDeviceQueueCreateInfo' this structure describes the number of queues we want for a single family.
+
+            // Graphics Queue
+        VkDeviceQueueCreateInfo graphicsQueueCreateInfo{};
+        graphicsQueueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        graphicsQueueCreateInfo.queueFamilyIndex = indices.graphicsFamily;
+        graphicsQueueCreateInfo.queueCount = 1; // Number of graphics queues we want
+            // vulkan lets you assign priorities to queues to influence the scheduling of command buffer execution using floating
+            // point number between 0.0 and 1.0. This is required even if there is only a single queue.
+        float queuePriorities = 1.0f;
+        graphicsQueueCreateInfo.pQueuePriorities = &queuePriorities;
+
+            // Presentation Queue
+        VkDeviceQueueCreateInfo presentationQueueCreateInfo{};
+        presentationQueueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        presentationQueueCreateInfo.queueFamilyIndex = indices.presentFamily;
+        presentationQueueCreateInfo.queueCount = 1; // Number of presentation queues we want
+        presentationQueueCreateInfo.pQueuePriorities = &queuePriorities;
+#else
+        // VkDeviceQueueCreateInfo::queueFamilyIndex must be unique
+        std::set<uint32_t> uniqueQueueFamilies = { queueIndices.graphicsFamily, queueIndices.presentFamily, queueIndices.transferFamily};
+
+        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+        float queuePriority = 1.0f;
+
+        for(uint32_t queueFamily : uniqueQueueFamilies)
+        {
+            VkDeviceQueueCreateInfo queueCreateInfo{};
+            queueCreateInfo.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueCreateInfo.queueFamilyIndex = queueFamily;
+            queueCreateInfo.queueCount       = 1;
+            queueCreateInfo.pQueuePriorities = &queuePriority;
+
+            queueCreateInfos.push_back(queueCreateInfo);
+        }
+#endif
+
+        ///////////////// Specifying set of device features that we'll be using.
+            // Right Now we don't need anythi special, so we can simply defint it and leave everyting to VK_FALSE.
+        VkPhysicalDeviceFeatures deviceFeatures{};
+
+        ///////////////// Creating the logical device
+        VkDeviceCreateInfo deviceCreateInfo{};
+        deviceCreateInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+
+        deviceCreateInfo.pQueueCreateInfos       = queueCreateInfos.data();
+        deviceCreateInfo.queueCreateInfoCount    = static_cast<uint32_t>(queueCreateInfos.size());
+
+        deviceCreateInfo.pEnabledFeatures        = &deviceFeatures;
+
+        deviceCreateInfo.enabledExtensionCount   = static_cast<uint32_t>(vulkanRequiredDeviceExtensions.size());
+        deviceCreateInfo.ppEnabledExtensionNames = vulkanRequiredDeviceExtensions.data();
+
+        uint32_t layerCount = 0;
+        const char** supportedInstanceLayers = VkUtil::GetVulkanInstanceSupportedLayers(&layerCount);
+        deviceCreateInfo.enabledLayerCount       = layerCount;
+        deviceCreateInfo.ppEnabledLayerNames     = supportedInstanceLayers;
+
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateDevice(physicalDevice /* Device to interface with */, &deviceCreateInfo, nullptr, pDevice), false);
+
+        return true;
+    }
+}
