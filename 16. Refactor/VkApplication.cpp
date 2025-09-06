@@ -892,7 +892,9 @@ namespace VkApplication
         return true;
     }
 
-    
+    /**
+     * @brief InitializeVulkan()
+     */
     bool InitializeVulkan(HWND windowHandle)
     {
 #define CHECK_FUNCTION_RETURN(x) \
