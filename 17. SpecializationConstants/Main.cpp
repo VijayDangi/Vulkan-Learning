@@ -62,7 +62,7 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInsatnce, LPSTR szCmdLin
     {
         LogInfo("Log File Opened...");
     }
-    
+
     //Initialize window attributes
     wndclass.cbSize         = sizeof(WNDCLASSEX);
     wndclass.style          = CS_HREDRAW | CS_VREDRAW /* | CS_OWNDC */;
@@ -149,7 +149,7 @@ bool PollWindowEvent()
 }
 
 //Error Log
-void PrintLog( int text_color, int background_color, int lineNo, char *fileName, char *functionName, char *format, ...)
+void PrintLog( const char *verbose, int text_color, int background_color, int lineNo, const char *fileName, const char *functionName, const char *format, ...)
 {
     if( gpLogFile)
     {
@@ -157,16 +157,16 @@ void PrintLog( int text_color, int background_color, int lineNo, char *fileName,
 
         va_start( argList, format);
 
-            fprintf( gpLogFile, "[%s\\%s() : %d]: ", fileName, functionName, lineNo);
+            fprintf( gpLogFile, "[%s\\%s() : %d]: [%s] ", fileName, functionName, lineNo, verbose);
             vfprintf( gpLogFile, format, argList);
             fprintf( gpLogFile, "\n");
             fflush( gpLogFile);
 
 #if USE_CONSOLE_BASED_APPLICATION
-    printf( "[%s\\%s() : %d]: \033[%d;%dm", fileName, functionName, lineNo, background_color, text_color);
-    vprintf( format, argList);
-    printf("\033[m");
-    printf( "\n");
+            printf( "[%s\\%s() : %d]: \033[%d;%dm[%s] ", fileName, functionName, lineNo, background_color, text_color, verbose);
+            vprintf( format, argList);
+            printf("\033[m");
+            printf( "\n");
 #endif
 
         va_end( argList);
@@ -224,6 +224,10 @@ LRESULT CALLBACK WndProc( HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
                 case 0x46:  //'F' or 'f'
                     ToggleFullScreen();
                     gbFullscreen = !gbFullscreen;
+                break;
+
+                case 'R':
+                    VkApplication::RecreatePipeline();
                 break;
             }
         break;

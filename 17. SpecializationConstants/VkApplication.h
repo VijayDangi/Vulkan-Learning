@@ -7,6 +7,8 @@ namespace VkApplication
     void ResizeCallback(int width, int height);
     void DrawFrame();
     void Uninitialize();
+
+    void RecreatePipeline();
     
 } // namespace VkApplication
 

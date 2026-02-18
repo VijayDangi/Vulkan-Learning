@@ -92,6 +92,16 @@ namespace VkUtil
      * @brief CreateVkFramebuffer()
     */
     bool CreateVkFramebuffer(VkDevice device, VkRenderPass renderPass, uint32_t attachment_count, VkImageView *pAttachments, uint32_t width, uint32_t height, uint32_t layers, VkFramebuffer *pFramebuffer);
+
+    /**
+     * @brief CreateImage2D()
+     */
+    bool CreateImage2D(VkPhysicalDevice physicalDevice, VkDevice device, uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage *image, VkDeviceMemory *imageMemory);
+
+    /**
+     * @brief Create2DImageView()
+     */
+    bool Create2DImageView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, VkImageView *imageView);
 };
 
 namespace VkCustomAPI
@@ -100,6 +110,11 @@ namespace VkCustomAPI
     * @brief: LogVulkanPhysicalDevicesInfo()
     */
     void LogVulkanPhysicalDevicesInfo(VkInstance vkInstance);
+
+    /**
+    * @brief: LogPhysicalDeviceInfo()
+    */
+    void LogPhysicalDeviceInfo(VkPhysicalDevice device);
 
     /**
      * @brief GetSwapChainSupportDetails()

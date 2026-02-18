@@ -48,21 +48,21 @@
 
 
 #define Log(fmt, ...) \
-        PrintLog(LOG_CONSOLE_LIGHT_TEXT_GREY_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
+        PrintLog("[Log]", LOG_CONSOLE_LIGHT_TEXT_GREY_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
 
 #define LogError(fmt, ...) \
-        PrintLog(LOG_CONSOLE_DARK_TEXT_RED_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
+        PrintLog("[LogError]", LOG_CONSOLE_DARK_TEXT_RED_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
 
 #define LogWarning(fmt, ...) \
-        PrintLog(LOG_CONSOLE_LIGHT_TEXT_YELLOW_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
+        PrintLog("[LogWarning]", LOG_CONSOLE_DARK_TEXT_YELLOW_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
 
 #define LogInfo(fmt, ...) \
-        PrintLog(LOG_CONSOLE_LIGHT_TEXT_BLUE_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
+        PrintLog("[LogInfo]", LOG_CONSOLE_LIGHT_TEXT_BLUE_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
 
 #define LogSuccess(fmt, ...) \
-        PrintLog(LOG_CONSOLE_LIGHT_TEXT_GREEN_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
+        PrintLog("[LogSuccess]", LOG_CONSOLE_LIGHT_TEXT_GREEN_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
 
-void PrintLog( int text_color, int background_color, int lineNo, char *fileName, char *functionName, char *format, ...);
+void PrintLog( const char *verbose, int text_color, int background_color, int lineNo, const char *fileName, const char *functionName, const char *format, ...);
 
 
 extern HWND  ghwnd;

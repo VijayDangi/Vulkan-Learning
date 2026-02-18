@@ -13,11 +13,13 @@ namespace VulkanHelper
 
     std::string GetVkImageUsageFlagsString(uint32_t bits);
 
-    std::string GetVkFormatString(uint32_t value);
+    const char* GetVkFormatString(uint32_t value);
 
-    std::string GetVkColorSpaceString(uint32_t value);
+    const char* GetVkColorSpaceString(uint32_t value);
 
-    std::string GetVkPresentModeString(uint32_t value);
+    const char* GetVkPresentModeString(uint32_t value);
+
+    const char* GetVkObjectTypeName(VkObjectType type);
 } // namespace VulkanHelper
 
 #endif // __VULKAN_HELPER_H__

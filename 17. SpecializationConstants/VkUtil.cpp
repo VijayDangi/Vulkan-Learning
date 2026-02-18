@@ -171,19 +171,39 @@ namespace VkUtil
         switch(messageSeverity)
         {
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
-                Log("Validation Layer: %s", pCallbackData->pMessage);
+                Log("Validation Layer: [Verbose]: %s", pCallbackData->pMessage);
+                Log("Validation Layer: [For Objects] :");
+                for(int i = 0; i < pCallbackData->objectCount; ++i)
+                {
+                    Log("Validation Layer: %s", VulkanHelper::GetVkObjectTypeName(pCallbackData->pObjects[i].objectType));
+                }
                 break;
 
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
-                LogInfo("Validation Layer: %s", pCallbackData->pMessage);
+                LogInfo("Validation Layer: [Info]:    %s", pCallbackData->pMessage);
+                Log("Validation Layer: [For Objects] :");
+                for(int i = 0; i < pCallbackData->objectCount; ++i)
+                {
+                    Log("Validation Layer: %s", VulkanHelper::GetVkObjectTypeName(pCallbackData->pObjects[i].objectType));
+                }
                 break;
 
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
-                LogWarning("Validation Layer: %s", pCallbackData->pMessage);
+                LogWarning("Validation Layer: [WARNING]: %s", pCallbackData->pMessage);
+                Log("Validation Layer: [For Objects] :");
+                for(int i = 0; i < pCallbackData->objectCount; ++i)
+                {
+                    Log("Validation Layer: %s", VulkanHelper::GetVkObjectTypeName(pCallbackData->pObjects[i].objectType));
+                }
                 break;
 
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
-                LogError("Validation Layer: %s", pCallbackData->pMessage);
+                LogError("Validation Layer: [Error]:   %s", pCallbackData->pMessage);
+                Log("Validation Layer: [For Objects] :");
+                for(int i = 0; i < pCallbackData->objectCount; ++i)
+                {
+                    Log("Validation Layer: %s", VulkanHelper::GetVkObjectTypeName(pCallbackData->pObjects[i].objectType));
+                }
                 break;
         }
 
@@ -330,17 +350,7 @@ namespace VkUtil
         }
 
         ////////////////////////////////////
-        /*
-            typedef struct VkApplicationInfo {
-                VkStructureType    sType;
-                const void*        pNext;
-                const char*        pApplicationName;
-                uint32_t           applicationVersion;
-                const char*        pEngineName;
-                uint32_t           engineVersion;
-                uint32_t           apiVersion;
-            } VkApplicationInfo;
-        */
+
         VkApplicationInfo appInfo{};                            // Optional Struct
         appInfo.sType               = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         appInfo.pApplicationName    = "Hello Triangle";
@@ -350,18 +360,6 @@ namespace VkUtil
         appInfo.apiVersion          = VK_API_VERSION_1_0;
         appInfo.pNext               = nullptr;
 
-        /*
-            typedef struct VkInstanceCreateInfo {
-                VkStructureType             sType;
-                const void*                 pNext;
-                VkInstanceCreateFlags       flags;
-                const VkApplicationInfo*    pApplicationInfo;
-                uint32_t                    enabledLayerCount;
-                const char* const*          ppEnabledLayerNames;
-                uint32_t                    enabledExtensionCount;
-                const char* const*          ppEnabledExtensionNames;
-            } VkInstanceCreateInfo;
-        */
         VkInstanceCreateInfo createInfo{};
         createInfo.sType            = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
@@ -685,6 +683,64 @@ namespace VkUtil
 
         return true;
     }
+
+    /**
+     * @brief CreateImage2D()
+     */
+    bool CreateImage2D(VkPhysicalDevice physicalDevice, VkDevice device, uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage *image, VkDeviceMemory *imageMemory)
+    {
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.extent.width = width;
+        imageInfo.extent.height = height;
+        imageInfo.extent.depth = 1;
+        imageInfo.mipLevels = mipLevels;
+        imageInfo.arrayLayers = 1;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.format = format;
+        imageInfo.tiling = tiling;
+        imageInfo.usage = usage;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateImage(device, &imageInfo, nullptr, image), VK_SUCCESS);
+
+        // memory type
+        VkMemoryRequirements memRequirements{};
+        vkGetImageMemoryRequirements( device, *image, &memRequirements);
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memRequirements.size;
+        allocInfo.memoryTypeIndex = VkUtil::FindMemoryType(physicalDevice, memRequirements.memoryTypeBits, properties);
+
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkAllocateMemory(device, &allocInfo, nullptr, imageMemory), VK_SUCCESS);
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkBindImageMemory(device, *image, *imageMemory, 0), VK_SUCCESS);
+
+        return true;
+    }
+
+    /**
+     * @brief Create2DImageView()
+     */
+    bool Create2DImageView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, VkImageView *imageView)
+    {
+        VkImageViewCreateInfo imageViewInfo{};
+        imageViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        imageViewInfo.image = image;
+        imageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        imageViewInfo.format = format;
+
+        imageViewInfo.subresourceRange.aspectMask = aspectFlags;
+        imageViewInfo.subresourceRange.baseMipLevel = 0;
+        imageViewInfo.subresourceRange.levelCount = 1;
+        imageViewInfo.subresourceRange.baseArrayLayer = 0;
+        imageViewInfo.subresourceRange.layerCount = 1;
+
+        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateImageView(device, &imageViewInfo, nullptr, imageView), VK_SUCCESS);
+        return true;
+    }
 };
 
 
@@ -698,7 +754,7 @@ namespace VkCustomAPI
     * @brief: LogVulkanPhysicalDevicesInfo()
     */
     void LogVulkanPhysicalDevicesInfo(VkInstance vkInstance)
-   {
+    {
         // Listing the graphics cards.
         uint32_t deviceCount = 0;
         VkResult vulkanErrorCode = vkEnumeratePhysicalDevices(vkInstance, &deviceCount, nullptr);
@@ -758,7 +814,80 @@ namespace VkCustomAPI
 
         Log("\nPhysical Device Properties:\n%s", device_details_log.c_str());
         device_details_log.clear();
-   }
+    }
+
+    /**
+     * @brief LogPhysicalDeviceInfo()
+     */
+    void LogPhysicalDeviceInfo(VkPhysicalDevice device)
+    {
+        // code
+        VkPhysicalDeviceProperties deviceProperties{};
+        vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+        std::string deviceType;
+        switch(deviceProperties.deviceType)
+        {
+            case VK_PHYSICAL_DEVICE_TYPE_OTHER:             deviceType = "OTHER";           break;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:    deviceType = "INTEGRATED GPU";  break;
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:      deviceType = "DISCRETE GPU";    break;
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:       deviceType = "VIRTUAL GPU";     break;
+            case VK_PHYSICAL_DEVICE_TYPE_CPU:               deviceType = "CPU";             break;
+        }
+
+        std::string device_details_log = "\n";
+        device_details_log = device_details_log + "\tDevice Name:    " + deviceProperties.deviceName + "\n";
+        device_details_log = device_details_log + "\tDevice Type:    " + deviceType + "\n";
+
+        char hexVenderID[16]{};
+        sprintf(hexVenderID, "0x%X", deviceProperties.vendorID);
+
+        char hexDeviceID[16]{};
+        sprintf(hexDeviceID, "0x%X", deviceProperties.deviceID);
+
+        device_details_log = device_details_log + "\tVender ID:      " + hexVenderID + "\n";
+        device_details_log = device_details_log + "\tDevice ID:      " + hexDeviceID + "\n";
+        device_details_log = device_details_log + "\tAPI Version:    " + 
+            std::to_string(VK_API_VERSION_MAJOR(deviceProperties.apiVersion)) + "." +
+            std::to_string(VK_API_VERSION_MINOR(deviceProperties.apiVersion)) + "." +
+            std::to_string(VK_API_VERSION_PATCH(deviceProperties.apiVersion)) + "\n";
+        device_details_log = device_details_log + "\tDriver Version: " +
+            std::to_string( deviceProperties.driverVersion >> 22) + "." +           // Major Version
+            std::to_string((deviceProperties.driverVersion >> 12) & 0x3ff) + "." +  // Minor Version
+            std::to_string( deviceProperties.driverVersion & 0xfff) + "\n";         // Patch
+        device_details_log += "\n";
+
+        // Extension
+        device_details_log += "\tSupported Extensions: \n";
+
+        uint32_t extensionCount = 0;
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr), );
+
+        std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+        VK_UTIL_FN_ERROR_CHECK_RETURN( vkEnumerateDeviceExtensionProperties( device, nullptr, &extensionCount, availableExtensions.data()), );
+
+        for(const VkExtensionProperties& extension : availableExtensions)
+        {
+            device_details_log = device_details_log + "\t\t" + extension.extensionName +"\n";
+        }
+
+        // Features
+        // device_details_log += "\tSupported Features: \n";
+
+        // uint32_t featureCount = 0;
+        // vkGetPhysicalDeviceFeatures( )
+        // VK_UTIL_FN_ERROR_CHECK_RETURN( vkEnumerateDeExtensionProperties(device, nullptr, &extensionCount, nullptr), );
+
+        // std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+        // VK_UTIL_FN_ERROR_CHECK_RETURN( vkEnumerateDeviceExtensionProperties( device, nullptr, &extensionCount, availableExtensions.data()), );
+
+        // for(const VkExtensionProperties& extension : availableExtensions)
+        // {
+        //     device_details_log = device_details_log + "\t\t" + extension.extensionName +"\n";
+        // }
+
+        LogInfo("%s", device_details_log.c_str());
+    }
 
     /**
      * @brief LogSwapChainSupportDetails()
@@ -1063,6 +1192,10 @@ namespace VkCustomAPI
         ///////////////// Specifying set of device features that we'll be using.
             // Right Now we don't need anythi special, so we can simply defint it and leave everyting to VK_FALSE.
         VkPhysicalDeviceFeatures deviceFeatures{};
+        vkGetPhysicalDeviceFeatures(physicalDevice, &deviceFeatures);
+
+        // Enable the samplerAnisotropy feature
+        deviceFeatures.samplerAnisotropy = VK_TRUE;
 
         ///////////////// Creating the logical device
         VkDeviceCreateInfo deviceCreateInfo{};
