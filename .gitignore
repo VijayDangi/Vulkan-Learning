@@ -13,3 +13,4 @@ LogFile.txt
 # whitelist
 # !shaders/**
 !**/models/*
+!**/Assets/*
