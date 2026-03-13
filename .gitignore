@@ -9,8 +9,10 @@ LogFile.txt
 *.obj
 
 *.spv
+*.dll
 
 # whitelist
 # !shaders/**
 !**/models/*
 !**/Assets/*
+!Common/**
