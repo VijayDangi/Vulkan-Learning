@@ -25,11 +25,12 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include "../Common/glm/gtx/hash.hpp"
 
+#define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <tiny_gltf.h>
 
-#define TINYOBJLOADER_IMPLEMENTATION
-#include "../Common/tiny_obj_loader/tiny_obj_loader.h"
+#include <ktx.h>
 
 #include <chrono>
 
@@ -254,8 +255,8 @@ namespace VkApplication
     VkImageView vulkanDepthImageView;
 
 
-    const std::string MODEL_PATH = "models/viking_room.obj";
-    const std::string TEXTURE_PATH = "texture/viking_room.png";
+    const std::string MODEL_PATH = "models/viking_room.glb";
+    const std::string TEXTURE_PATH = "texture/viking_room.ktx2";
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -2281,6 +2282,8 @@ namespace VkApplication
         region.imageOffset = {0, 0, 0};
         region.imageExtent = { width, height, 1};
 
+        LogWarning("Dimension: %u, %u, %u", region.imageExtent.width, region.imageExtent.height, region.imageExtent.depth);
+
         vkCmdCopyBufferToImage( commandBuffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
         EndSingleTimeCommands(vulkanTransferCommandPool, commandBuffer, vulkanTransferQueue);
@@ -2471,22 +2474,48 @@ namespace VkApplication
     static bool CreateTextureImage()
     {
         // code
-        int texWidth = 0, texHeight = 0, texChannels = 0;
-        stbi_uc *pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-        VkDeviceSize imageSize = texWidth * texHeight * 4;
-
-        if(!pixels)
+        // Load KTX2 texture instead of using stb_image
+        ktxTexture *kTexture = nullptr;
+        KTX_error_code result = ktxTexture_CreateFromNamedFile(TEXTURE_PATH.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &kTexture);
+        if(result != KTX_SUCCESS)
         {
-            LogError("[Error] Failed to load texture image!");
+            LogError("[Error] Failed to load texture image!, %d", (int)result);
             return false;
         }
+        
+        // Get texture dimension and data
+        uint32_t texWidth = kTexture->baseWidth;
+        uint32_t texHeight = kTexture->baseHeight;
+        ktx_size_t imageSize = ktxTexture_GetImageSize(kTexture, 0);
+        ktx_uint8_t *ktxTextureData = ktxTexture_GetData(kTexture);
+        uint32_t texChannels = ktxTexture_GetElementSize(kTexture);
 
         // Calculate mip-map level
         textureMipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
 
+        LogWarning("Texture Width     : %u", texWidth);
+        LogWarning("Texture Height    : %u", texHeight);
+        LogWarning("Texture Image Size: %lu", imageSize);
+        LogWarning("Mipmap Levels     : %u, %u", textureMipLevels, kTexture->numLevels);
+
+        LogWarning("ktx_bool_t   isArray: %u"        , (uint32_t)kTexture->isArray);
+        LogWarning("ktx_bool_t   isCubemap: %u"      , (uint32_t)kTexture->isCubemap);
+        LogWarning("ktx_bool_t   isCompressed: %u"   , (uint32_t)kTexture->isCompressed);
+        LogWarning("ktx_bool_t   generateMipmaps: %u", (uint32_t)kTexture->generateMipmaps);
+        LogWarning("ktx_uint32_t baseWidth: %u"      , kTexture->baseWidth);
+        LogWarning("ktx_uint32_t baseHeight: %u"     , kTexture->baseHeight);
+        LogWarning("ktx_uint32_t baseDepth: %u"      , kTexture->baseDepth);
+        LogWarning("ktx_uint32_t numDimensions: %u"  , kTexture->numDimensions);
+        LogWarning("ktx_uint32_t numLevels: %u"      , kTexture->numLevels);
+        LogWarning("ktx_uint32_t numLayers: %u"      , kTexture->numLayers);
+        LogWarning("ktx_uint32_t numFaces: %u"       , kTexture->numFaces);
+        LogWarning("ktx_uint32_t kvDataLen: %u"      , kTexture->kvDataLen);
+        LogWarning("ktx_size_t   dataSize: %u"       , (uint32_t)kTexture->dataSize);
+        LogWarning("Element Size: %u"       , texChannels);
+
         // Creating Staging Buffer
-        VkBuffer stagingBuffer;
-        VkDeviceMemory stagingBufferMemory;
+        VkBuffer stagingBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory stagingBufferMemory = VK_NULL_HANDLE;
 
         if(!CreateBuffer( imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory))
         {
@@ -2494,42 +2523,51 @@ namespace VkApplication
             return false;
         }
 
-        // Copy image data to staging buffer
+        // Copy texture data to staging buffer
         void *data = nullptr;
         vkMapMemory( vulkanLogicalDevice, stagingBufferMemory, 0, imageSize, 0, &data);
-            memcpy(data, pixels, static_cast<size_t>(imageSize));
+            memcpy(data, ktxTextureData, imageSize);
         vkUnmapMemory(vulkanLogicalDevice, stagingBufferMemory);
         data = nullptr;
-
-        stbi_image_free(pixels);
-        pixels = nullptr;
-
+        
         // Create texture
-        if( !CreateImage2D( static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), textureMipLevels, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanTextureImage, vulkanTextureImageMemory))
+        VkFormat textureFormat = VK_FORMAT_UNDEFINED;
+
+            // check if the KTX textrue has a format
+        if(kTexture->classId == ktxTexture1_c)
+        {
+            // For KTX2 files, we can get the format directly
+            ktxTexture2 *ktx2 = reinterpret_cast<ktxTexture2*>(kTexture);
+            textureFormat = static_cast<VkFormat>(ktx2->vkFormat);
+            if(textureFormat == VK_FORMAT_UNDEFINED)
+            {
+                textureFormat = VK_FORMAT_R8G8B8A8_SRGB;
+            }
+        }
+        else
+        {
+            textureFormat = VK_FORMAT_R8G8B8A8_SRGB;
+        }
+
+        if( !CreateImage2D( texWidth, texHeight, textureMipLevels, VK_SAMPLE_COUNT_1_BIT, textureFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanTextureImage, vulkanTextureImageMemory))
         {
             LogError("[Error] CreateImage2D() Failed.");
             return false;
         }
 
-        // Transition image layout as destination for transfer.
-        if(!TransitionImageLayout( vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, textureMipLevels))
-        {
-            LogError("[Error] TransitionImageLayout() Failed.");
-            return false;
-        }
-
         // Copy data from staging buffer to image.
-        CopyBufferToImage(stagingBuffer, vulkanTextureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+        TransitionImageLayout( vulkanTextureImage, textureFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, textureMipLevels);
+        CopyBufferToImage(stagingBuffer, vulkanTextureImage, texWidth, texHeight);
 
         // // Transition image layout to start sampling from the texture image in the shader.
-        // if(!TransitionImageLayout(vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, textureMipLevels))
+        // if(!TransitionImageLayout(vulkanTextureImage, textureFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, textureMipLevels))
         // {
         //     LogError("[Error] TransitionImageLayout() Failed.");
         //     return false;
         // }
 
         // Generate Mipmaps
-        if(!GenerateMipmaps(vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, textureMipLevels))
+        if(!GenerateMipmaps(vulkanTextureImage, textureFormat, texWidth, texHeight, textureMipLevels))
         {
             LogError("[Error] GenerateMipmaps() Failed.");
             return false;
@@ -2538,6 +2576,9 @@ namespace VkApplication
         // clenaup
         vkDestroyBuffer(vulkanLogicalDevice, stagingBuffer, nullptr);
         vkFreeMemory( vulkanLogicalDevice, stagingBufferMemory, nullptr);
+
+        ktxTexture_Destroy(kTexture);
+        kTexture = nullptr;
 
         LogSuccess("[Success] CreateTextureImage() Succeded.");
 
@@ -2827,49 +2868,122 @@ namespace VkApplication
     static bool LoadModel()
     {
         // code
-        tinyobj::attrib_t attrib;
-        std::vector<tinyobj::shape_t> shapes;
-        std::vector<tinyobj::material_t> materials;
-        std::string warnigs, errors;
+        tinygltf::Model model;
+        tinygltf::TinyGLTF loader;
+        std::string warnings, errors;
 
-        if(!tinyobj::LoadObj(&attrib, &shapes, &materials, &warnigs, &errors, MODEL_PATH.c_str()))
+        bool returnVal = loader.LoadBinaryFromFile( &model, &errors, &warnings, MODEL_PATH);
+        if(!warnings.empty())
         {
-            LogWarning("[Warning] %s", warnigs.c_str());
-            LogError("[Error] %s", errors.c_str());
+            LogWarning("[GLTF Warning] %s", warnings.c_str());
+        }
+
+        if(!errors.empty())
+        {
+            LogError("[GLTF Error] %s", errors.c_str());
+        }
+
+        if(!returnVal)
+        {
+            LogError("GLTF Model Loading Failed");
             return false;
         }
 
-        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
-
         // We are combining all faces in the file into a single model.
-        for(const tinyobj::shape_t& shape : shapes)
+        for(const tinygltf::Mesh& mesh : model.meshes)
         {
-            for(const tinyobj::index_t& index : shape.mesh.indices)
+            Log("");
+            for(const tinygltf::Primitive primitive : mesh.primitives)
             {
-                Vertex vertex;
+                Log("");
+                // Get Indices
+                const tinygltf::Accessor& indexAccessor = model.accessors[primitive.indices];
+                const tinygltf::BufferView& indexBufferView = model.bufferViews[indexAccessor.bufferView];
+                const tinygltf::Buffer& indexBuffer = model.buffers[indexBufferView.buffer];
 
-                vertex.position =
+                Log("");
+
+                // Get Vertex Positions
+                const tinygltf::Accessor& positionAccessor = model.accessors[primitive.attributes.at("POSITION")];
+                const tinygltf::BufferView& positionBufferView = model.bufferViews[positionAccessor.bufferView];
+                const tinygltf::Buffer& positionBuffer = model.buffers[positionBufferView.buffer];
+
+                Log("");
+
+                // Get Texture Coordindates if available
+                bool hasTexCoords = primitive.attributes.find("TEXCOORD_0") != primitive.attributes.end();
+
+                const tinygltf::Accessor *pTexCoordAccessor = nullptr;
+                const tinygltf::BufferView *pTexCoordBufferView = nullptr;
+                const tinygltf::Buffer *pTexCoordBuffer = nullptr;
+
+                Log("");
+                if(hasTexCoords)
                 {
-                    attrib.vertices[3 * index.vertex_index + 0],
-                    attrib.vertices[3 * index.vertex_index + 1],
-                    attrib.vertices[3 * index.vertex_index + 2]
-                };
+                    pTexCoordAccessor = &model.accessors[primitive.attributes.at("TEXCOORD_0")];
+                    pTexCoordBufferView = &model.bufferViews[pTexCoordAccessor->bufferView];
+                    pTexCoordBuffer = &model.buffers[pTexCoordBufferView->buffer];
+                }
 
-                vertex.texcoord =
+                uint32_t baseVertex = (uint32_t) vertices.size();
+
+                Log("");
+                // Process Vertices
+                for(size_t i = 0; i < positionAccessor.count; ++i)
                 {
-                    attrib.texcoords[2 * index.texcoord_index + 0],
-                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-                };
+                    Vertex vertex{};
 
-                vertex.color = { 1.0f, 1.0f, 1.0f};
+                    // Get Position
+                    const float *pos = reinterpret_cast<const float*>(&positionBuffer.data[positionBufferView.byteOffset + positionAccessor.byteOffset + i * 12]);
+                    vertex.position = { pos[0], pos[1], pos[2] };
 
-                if(uniqueVertices.count(vertex) == 0)
-                {
-                    uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
+                    // Get texture coordinate if available
+                    if(hasTexCoords)
+                    {
+                        const float *texCoord = reinterpret_cast<const float*>(&pTexCoordBuffer->data[pTexCoordBufferView->byteOffset + pTexCoordAccessor->byteOffset + i * 8]);
+                        vertex.texcoord = { texCoord[0], texCoord[1] };
+                    }
+                    else
+                    {
+                        vertex.texcoord = { 0.0f, 0.0f };
+                    }
+
+                    // Set default color
+                    vertex.color = { 1.0f, 1.0f, 1.0f};
+
                     vertices.push_back(vertex);
                 }
 
-                indices.push_back(uniqueVertices[vertex]);
+                Log("");
+                // Process Indices
+                const unsigned char *indexData = &indexBuffer.data[indexBufferView.byteOffset + indexAccessor.byteOffset];
+                
+                // Handle different index component types
+                if(indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
+                {
+                    const uint16_t *pIndices16 = reinterpret_cast<const uint16_t*>(indexData);
+                    for(size_t i = 0; i < indexAccessor.count; ++i)
+                    {
+                        indices.push_back(baseVertex + pIndices16[i]);
+                    }
+                }
+                else if(indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)
+                {
+                    const uint32_t *pIndices32 = reinterpret_cast<const uint32_t*>(indexData);
+                    for(size_t i = 0; i < indexAccessor.count; ++i)
+                    {
+                        indices.push_back(baseVertex + pIndices32[i]);
+                    }
+                }
+                else if(indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
+                {
+                    const uint8_t *pIndices8 = reinterpret_cast<const uint8_t*>(indexData);
+                    for(size_t i = 0; i < indexAccessor.count; ++i)
+                    {
+                        indices.push_back(baseVertex + pIndices8[i]);
+                    }
+                }
+                Log("");
             }
         }
 
@@ -3215,7 +3329,8 @@ namespace VkApplication
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
         UniformBufferObject ubo{};
-        ubo.modelMatrix = glm::rotate(glm::mat4(1.0f), time * glm::radians(10.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.modelMatrix = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        ubo.modelMatrix = glm::rotate(ubo.modelMatrix, time * glm::radians(10.0f), glm::vec3(0.0f, 1.0f, 0.0f));
         ubo.viewMatrix = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.projectionMatrix = glm::perspective(glm::radians(45.0f), vulkanSwapChainExtent.width / (float)vulkanSwapChainExtent.height, 0.1f, 10.0f);
 

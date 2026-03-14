@@ -1,0 +1,25 @@
+@ref : https://docs.vulkan.org/tutorial/latest/15_GLTF_KTX2_Migration.html
+
+
+
+# Create a basic KTX2 file
+toktx texture.ktx2 texture.png
+
+# Create a KTX2 file with mipmaps
+toktx --mipmap texture.ktx2 texture.png
+
+# Create a KTX2 file with Basis Universal compression
+toktx --bcmp texture.ktx2 texture.png
+
+# Create a KTX2 file with specific GPU compression format (BC7)
+toktx --bcmp --format BC7_RGBA texture.ktx2 texture.png
+
+# Create a cubemap KTX2 file
+toktx --cubemap cubemap.ktx2 posx.png negx.png posy.png negy.png posz.png negz.png
+
+
+
+#force toktx to ignore the ICC profile and manually assign a color space using the --assign_oetf flag. For standard textures (most common), use:
+# srgb: Use this for color textures (Albedo/Diffuse).
+# linear: Use this for data textures like Normal maps, Roughness, or Metallic maps.
+toktx --assign_oetf srgb --encode uastc output.ktx2 .\texture\viking_room.png
