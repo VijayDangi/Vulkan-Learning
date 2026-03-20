@@ -36,67 +36,9 @@
 #include "Common.h"
 #include "VkApplication.h"
 #include "VulkanHelper.h"
+#include "VkTypes.h"
 
 #define ENABLE_VALIDATION_LAYER 1
-
-// forward declaration
-namespace VkApplication
-{
-    struct Vertex
-    {
-        glm::vec3 position;
-        glm::vec3 color;
-        glm::vec2 texcoord;
-
-        static VkVertexInputBindingDescription getBindingDescription()
-        {
-            // code
-            // Vertex binding describes at which rate to load data from memory throughout the vertices.
-            // It specifies the number of bytes between data entries and whether to move to the next data after
-            // each vertex or after each instance.
-            VkVertexInputBindingDescription bindingDescription{};
-
-            bindingDescription.binding = 0;                                 // Specifies the index of the binding in the array of bindings.
-            bindingDescription.stride = sizeof(Vertex);                     // Specifies the number of bytes from one entry to the next.
-            bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;     // PerVertex Or PerInstance.
-
-            return bindingDescription;
-        }
-
-        static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions()
-        {
-            // code
-            std::array<VkVertexInputAttributeDescription, 3> attributeDescription{};
-
-            // position
-            attributeDescription[0].binding = 0;
-            attributeDescription[0].location = 0;   // Shader Input Location Attribute.
-            attributeDescription[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-            attributeDescription[0].offset = offsetof(Vertex, position);
-
-            // color
-            attributeDescription[1].binding = 0;
-            attributeDescription[1].location = 1;   // Shader Input Location Attribute.
-            attributeDescription[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-            attributeDescription[1].offset = offsetof(Vertex, color);
-
-            // texcoord
-            attributeDescription[2].binding = 0;
-            attributeDescription[2].location = 2;   // Shader Input Location Attribute.
-            attributeDescription[2].format = VK_FORMAT_R32G32_SFLOAT;
-            attributeDescription[2].offset = offsetof(Vertex, texcoord);
-
-            return attributeDescription;
-        }
-    
-        bool operator==(const Vertex& other) const
-        {
-            return position == other.position &&
-                   color == other.color &&
-                   texcoord == other.texcoord;
-        }
-    };
-}
 
 
 // Template Specialization for std::hash<T>
