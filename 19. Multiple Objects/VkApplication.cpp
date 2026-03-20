@@ -44,9 +44,9 @@
 // Template Specialization for std::hash<T>
 namespace std
 {
-    template<> struct hash<VkApplication::Vertex>
+    template<> struct hash<vk_types::SVertex>
     {
-        size_t operator()(VkApplication::Vertex const& vertex) const
+        size_t operator()(vk_types::SVertex const& vertex) const
         {
             return ((hash<glm::vec3>()(vertex.position) ^ (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
             (hash<glm::vec2>()(vertex.texcoord) << 1);
@@ -68,30 +68,6 @@ namespace VkApplication
     #define CLAMP(_value, _min, _max)  MIN( MAX((_value), (_min)), (_max))
 #endif
 
-    // Type Declaration
-#define INVALID_QUEUE_FAMILY_HANDLE -1
-    struct QueueFamilyIndices
-    {
-        uint32_t graphicsFamily = INVALID_QUEUE_FAMILY_HANDLE;
-        uint32_t presentFamily = INVALID_QUEUE_FAMILY_HANDLE;       // Queue-specific feature which is Presenting to the Surface.
-        uint32_t transferFamily = INVALID_QUEUE_FAMILY_HANDLE;
-
-        bool IsComplete()
-        {
-            // code
-            return graphicsFamily != INVALID_QUEUE_FAMILY_HANDLE &&
-                   presentFamily != INVALID_QUEUE_FAMILY_HANDLE &&
-                   transferFamily != INVALID_QUEUE_FAMILY_HANDLE;
-        }
-    };
-
-    struct SwapChainSupportDetails
-    {
-        VkSurfaceCapabilitiesKHR capabilities;
-        std::vector<VkSurfaceFormatKHR> formats;
-        std::vector<VkPresentModeKHR> presentModes;
-    };
-    
     /*
     *   Uniform Alignment Requirement:
     *       Scalars have to be aligned by N = 4bytes
@@ -102,12 +78,13 @@ namespace VkApplication
     * 
     * inshort uniform buffer should have size multiple of 16 bytes, such a way that every member initial offset is multiple of 16
     */
-    struct UniformBufferObject
+    struct SUniformBufferObject
     {
         glm::mat4 modelMatrix;
         glm::mat4 viewMatrix;
         glm::mat4 projectionMatrix;
     };
+
 
     // Function Declaration
     static VkFormat FindDepthFormat();
@@ -136,6 +113,8 @@ namespace VkApplication
 
     const int MAX_FRAMES_IN_FLIGHT = 2; // Defines how many frames should be processed concurrently.
     uint32_t currentFrame = 0;  // Track of the current frame.
+    // Define the number of objects to render
+    constexpr int MAX_OBJECTS = 3;
 
     // Vulkan Specific Variables
     VkInstance vulkanInstance;
@@ -143,25 +122,29 @@ namespace VkApplication
     VkPhysicalDevice vulkanPhysicalDevice = VK_NULL_HANDLE; // This object will be implicitly destroyedd when 'VkInstance' is destroyed.
     VkDevice vulkanLogicalDevice;  // Vulkan Logical Device
     VkSurfaceKHR vulkanSurface;
-    VkSwapchainKHR vulkanSwapChain;
 
     VkQueue vulkanGraphicsQueue;        // Devices queue are implicitly cleaned up when device is destroyed.
     VkQueue vulkanPresentationQueue;    // Devices queue are implicitly cleaned up when device is destroyed.
     VkQueue vulkanTransferQueue;        // Devices queue are implicitly cleaned up when device is destroyed.
 
-    std::vector<VkImage> vulkanSwapChainImages; // The images were created by the implementation for the swap chain and they
-                                                // will be automatically cleaned up once the swap chain has been destroyed.
-    std::vector<VkImageView> vulkanSwapChainImageViews; // Unlike VkImage, VkImageView were explicitly created by us, so need to destroy them.
+    struct {
+        VkSwapchainKHR              handle;
+        std::vector<VkImage>        images;         // The images were created by the implementation for the swap chain and they will be automatically cleaned up once the swap chain has been destroyed.
+        std::vector<VkImageView>    imageViews;     // Unlike VkImage, VkImageView were explicitly created by us, so need to destroy them.
+        VkFormat                    imageFormat;
+        VkExtent2D                  extent;
 
-    VkFormat vulkanSwapChainImageFormat;
-    VkExtent2D vulkanSwapChainExtent;
+        vk_types::SVulkanTexture    depthTexture;         // The swap chain will not automatically create depth images for us. We need a single depth image, because, only one draw operation is running at once.
+        VkFormat                    depthFormat;
+    
+        bool                        framebufferResized = false;
+        std::vector<VkFramebuffer>  framebuffers;
+    } swapchain;
 
     VkRenderPass vulkanRenderPass;
     VkDescriptorSetLayout vulkanDescriptorSetLayout;
     VkPipelineLayout vulkanPipelineLayout;
     VkPipeline vulkanGraphicsPipeline;
-
-    std::vector<VkFramebuffer> vulkanSwapchainFramebuffers;
 
     VkCommandPool vulkanGraphicsCommandPool;
     VkCommandPool vulkanTransferCommandPool;
@@ -172,56 +155,33 @@ namespace VkApplication
     VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT];    // To signal that rendering has finished and presentation can happen.
     VkFence inFlightFences[MAX_FRAMES_IN_FLIGHT];                  // To make sure only one frame is rendering at a time.
 
-    bool framebufferResized = false;
-
-    // Uniform Buffers
-    VkBuffer vulkanUniformBuffers[MAX_FRAMES_IN_FLIGHT];
-    VkDeviceMemory vulkanUniformBuffersMemory[MAX_FRAMES_IN_FLIGHT];
-    void* uniformBuffersMapped[MAX_FRAMES_IN_FLIGHT]{};
-
     VkDescriptorPool vulkanDescriptorPool;
-    VkDescriptorSet vulkanDescriptorSets[MAX_FRAMES_IN_FLIGHT]; // Don't need to explicitly cleanup descriptor sets, becaise it will auto freed when desciptor pool destroyed.
 
     // Texture
     uint32_t textureMipLevels;
-    VkImage vulkanTextureImage;
-    VkDeviceMemory vulkanTextureImageMemory;
-    VkImageView vulkanTextureImageView;
-    VkSampler vulkanTextureSampler;
+    vk_types::SVulkanTexture blackcliff_amulet_texture;
+    VkSampler textureSampler;
 
-    // Depth Attachment - The swap chain will not automatically create depth images for us. We need a single depth image,
-    //                    because, only one draw operation is running at once.
-    VkImage vulkanDepthImage;
-    VkDeviceMemory vulkanDepthImageMemory;
-    VkImageView vulkanDepthImageView;
-
-
-    const std::string MODEL_PATH = "models/viking_room.obj";
-    const std::string TEXTURE_PATH = "texture/viking_room.png";
-
-    std::vector<Vertex> vertices;
+    // Model Buffers
+    vk_types::SVulkanBuffer vertexBuffer;
+    vk_types::SVulkanBuffer indexBuffer;
+    std::vector<vk_types::SVertex> vertices;
     std::vector<uint32_t> indices;
 
-    // Model Vertex Buffer
-    VkBuffer vulkanVertexBuffer;
-    VkDeviceMemory vulkanVertexBufferMemory;
-
-    // Model Index Buffer
-    VkBuffer vulkanIndexBuffer;
-    VkDeviceMemory vulkanIndexBufferMemory;
+    // Model Instance
+    std::array<vk_types::SGameObject, MAX_OBJECTS> gameObjects;
 
     // MSAA
     VkSampleCountFlagBits msaaSamplesCount = VK_SAMPLE_COUNT_1_BIT;
+    vk_types::SVulkanTexture msaaColorTexture;
 
-    // MSAA Resolved Color buffer
-    VkImage vulkanMSAAColorImage;
-    VkDeviceMemory vulkanMSAAColorImageMemory;
-    VkImageView vulkanMSAAColorImageView;
+    const std::string MODEL_PATH = "models/blackcliff_amulet.obj";
+    const std::string TEXTURE_PATH = "texture/blackcliff_amulet.png";
 
     /**
      * @brief LogSwapChainSupportDetails()
      */
-    static void LogSwapChainSupportDetails(SwapChainSupportDetails& details)
+    static void LogSwapChainSupportDetails(vk_types::SSwapChainSupportDetails& details)
     {
         // code
         std::string log_string;
@@ -466,7 +426,7 @@ namespace VkApplication
         createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
 
         createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                                                //    VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+                                                   VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
                                                    VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
                                                    VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
 
@@ -633,10 +593,10 @@ namespace VkApplication
     /**
      * @brief FindQueueFamilies()
      */
-    static QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device)
+    static vk_types::SQueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device)
     {
         // code
-        QueueFamilyIndices queueIndices;
+        vk_types::SQueueFamilyIndices queueIndices;
 
         uint32_t queueFamilyCount = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
@@ -717,17 +677,17 @@ namespace VkApplication
     /**
      * @brief QuerySwapChainSupport()
      */
-    static SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device)
+    static vk_types::SSwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device)
     {
         // code
-        SwapChainSupportDetails details;
+        vk_types::SSwapChainSupportDetails details;
 
         // Query Surface Capabilities
         VkResult errorCode = vkGetPhysicalDeviceSurfaceCapabilitiesKHR( device, vulkanSurface, &details.capabilities);
         if(errorCode)
         {
             LogError("Vulkan: [Error] vkGetPhysicalDeviceSurfaceCapabililtiesKHR() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return SwapChainSupportDetails();
+            return vk_types::SSwapChainSupportDetails();
         }
 
         // Querying Supported surface formats.
@@ -794,7 +754,7 @@ namespace VkApplication
         // Let's consider our application only usable for dedicated graphics card that support geometry shaders.
         return (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) && deviceFeatures.geometryShader;
 #else
-        QueueFamilyIndices indices = FindQueueFamilies(device);
+        vk_types::SQueueFamilyIndices indices = FindQueueFamilies(device);
 
         bool extensionSupported = CheckDeviceExtensionSupport(device);
 
@@ -803,7 +763,7 @@ namespace VkApplication
         {
             // For now Swap chain support if sufficient if there is at least one supported image format
             // and one supported presentation mode given the window surface we have.
-            SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(device);
+            vk_types::SSwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(device);
             swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
         }
 
@@ -916,7 +876,7 @@ namespace VkApplication
     static bool CreateVulkanLogicalDevice()
     {
         // code
-        QueueFamilyIndices indices = FindQueueFamilies(vulkanPhysicalDevice);
+        vk_types::SQueueFamilyIndices indices = FindQueueFamilies(vulkanPhysicalDevice);
 
         ///////////////// Specifying the queues to be created.
 #if 0
@@ -1072,7 +1032,7 @@ namespace VkApplication
     static bool CreateVulkanSwapChain()
     {
         // code
-        SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(vulkanPhysicalDevice);
+        vk_types::SSwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(vulkanPhysicalDevice);
 
         VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.formats);
         VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.presentModes);
@@ -1103,7 +1063,7 @@ namespace VkApplication
         swapChainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
             // Specify how to handle swap chain images that will be across multiple queue families.
-        QueueFamilyIndices indices = FindQueueFamilies(vulkanPhysicalDevice);
+        vk_types::SQueueFamilyIndices indices = FindQueueFamilies(vulkanPhysicalDevice);
         uint32_t queueFamilyIndices[] = { indices.graphicsFamily, indices.presentFamily};
 
         if(indices.graphicsFamily != indices.presentFamily)
@@ -1139,7 +1099,7 @@ namespace VkApplication
 
         swapChainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
 
-        VkResult errorCode = vkCreateSwapchainKHR( vulkanLogicalDevice, &swapChainCreateInfo, nullptr, &vulkanSwapChain);
+        VkResult errorCode = vkCreateSwapchainKHR( vulkanLogicalDevice, &swapChainCreateInfo, nullptr, &swapchain.handle);
         if(errorCode)
         {
             LogError("Vulkan: [Error] vkCreateSwapchainKHR() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
@@ -1150,15 +1110,15 @@ namespace VkApplication
 
         // Retrieving the swap chain images.
         imageCount = 0;
-        vkGetSwapchainImagesKHR(vulkanLogicalDevice, vulkanSwapChain, &imageCount, nullptr);
-        vulkanSwapChainImages.resize(imageCount);
-        vkGetSwapchainImagesKHR(vulkanLogicalDevice, vulkanSwapChain, &imageCount, vulkanSwapChainImages.data());
+        vkGetSwapchainImagesKHR(vulkanLogicalDevice, swapchain.handle, &imageCount, nullptr);
+        swapchain.images.resize(imageCount);
+        vkGetSwapchainImagesKHR(vulkanLogicalDevice, swapchain.handle, &imageCount, swapchain.images.data());
 
         LogSuccess("Vulkan: [Success] %u Images Retrieved from Swap Chain.", imageCount);
 
         // Store the format and extent we've chosen for the swap chain images.
-        vulkanSwapChainImageFormat = surfaceFormat.format;
-        vulkanSwapChainExtent = extent;
+        swapchain.imageFormat = surfaceFormat.format;
+        swapchain.extent = extent;
 
         return true;
     }
@@ -1220,12 +1180,12 @@ namespace VkApplication
     static bool CreateVulkanImageViewsForSwapchain()
     {
         // code
-        size_t imageCount = vulkanSwapChainImages.size();
-        vulkanSwapChainImageViews.resize(imageCount);
+        size_t imageCount = swapchain.images.size();
+        swapchain.imageViews.resize(imageCount);
 
         for(size_t imageIndex = 0; imageIndex < imageCount; ++imageIndex)
         {
-            if(!CreateImageView(vulkanSwapChainImages[imageIndex], vulkanSwapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, &vulkanSwapChainImageViews[imageIndex]))
+            if(!CreateImageView(swapchain.images[imageIndex], swapchain.imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, &swapchain.imageViews[imageIndex]))
             {
                 LogError("[Error] CreateImageView() Failed for %d.", imageIndex);
                 return false;
@@ -1303,7 +1263,7 @@ namespace VkApplication
         // code
 ////////////// Color Attachment Description.
         VkAttachmentDescription colorAttachmentDescrition{};
-        colorAttachmentDescrition.format = vulkanSwapChainImageFormat;
+        colorAttachmentDescrition.format = swapchain.imageFormat;
         colorAttachmentDescrition.samples = msaaSamplesCount;
 
         // 'loadOp' and 'storeOp' determine what to do with the data in the attachment before rendering and
@@ -1335,7 +1295,7 @@ namespace VkApplication
 
 ////////////// Depth Attachment Description.
         VkAttachmentDescription depthAttachmentDescription{};
-        depthAttachmentDescription.format         = FindDepthFormat();
+        depthAttachmentDescription.format         = swapchain.depthFormat;
         depthAttachmentDescription.samples        = msaaSamplesCount;
         depthAttachmentDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
         depthAttachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -1346,7 +1306,7 @@ namespace VkApplication
 
 ////////////// Color Resolve Attachment Description.
         VkAttachmentDescription colorAttachmentResolveDescription{};
-        colorAttachmentResolveDescription.format         = vulkanSwapChainImageFormat;
+        colorAttachmentResolveDescription.format         = swapchain.imageFormat;
         colorAttachmentResolveDescription.samples        = VK_SAMPLE_COUNT_1_BIT;
         colorAttachmentResolveDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         colorAttachmentResolveDescription.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1505,11 +1465,11 @@ namespace VkApplication
 
         VkPipelineShaderStageCreateInfo shaderStages[] = { vertexShaderStageInfo, fragmentShaderStageInfo };
 
-////////////// Vertex Input
+////////////// SVertex Input
         VkPipelineVertexInputStateCreateInfo vertexInputCreateInfo{};
 
-        VkVertexInputBindingDescription bindingDescription = Vertex::getBindingDescription();
-        std::array<VkVertexInputAttributeDescription, 3> attributeDescription = Vertex::getAttributeDescriptions();
+        VkVertexInputBindingDescription bindingDescription = vk_types::SVertex::getBindingDescription();
+        std::array<VkVertexInputAttributeDescription, 3> attributeDescription = vk_types::SVertex::getAttributeDescriptions();
 
         vertexInputCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
         vertexInputCreateInfo.vertexBindingDescriptionCount = 1;
@@ -1528,14 +1488,14 @@ namespace VkApplication
         VkViewport viewport{};
         viewport.x = 0.0f;
         viewport.y = 0.0f;
-        viewport.width = (float)vulkanSwapChainExtent.width;
-        viewport.height = (float)vulkanSwapChainExtent.height;
+        viewport.width = (float)swapchain.extent.width;
+        viewport.height = (float)swapchain.extent.height;
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
 
         VkRect2D scissor{};
         scissor.offset = { 0, 0};
-        scissor.extent = vulkanSwapChainExtent;
+        scissor.extent = swapchain.extent;
 
 ////////////// Dynamic State
         std::vector<VkDynamicState> dynamicStates = {
@@ -1734,24 +1694,24 @@ namespace VkApplication
             // one for presentation.
             // That means that we have to create a framebuffer for all of the images in the swap chain and use the one that
             // corresponds to the retrieved image at drawing time.
-        vulkanSwapchainFramebuffers.resize( vulkanSwapChainImageViews.size());
+        swapchain.framebuffers.resize( swapchain.imageViews.size());
 
         // Iterate through the image views and create framebuffers from them:
-        for(size_t i = 0; i < vulkanSwapChainImageViews.size(); ++i)
+        for(size_t i = 0; i < swapchain.imageViews.size(); ++i)
         {
             // Order of image views should be same as described while creating render pass.
-            VkImageView attachments[] = { vulkanMSAAColorImageView, vulkanDepthImageView, vulkanSwapChainImageViews[i]};
+            VkImageView attachments[] = { msaaColorTexture.m_View, swapchain.depthTexture.m_View, swapchain.imageViews[i]};
 
             VkFramebufferCreateInfo framebufferCreateInfo{};
             framebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
             framebufferCreateInfo.renderPass = vulkanRenderPass;
             framebufferCreateInfo.attachmentCount = _ARRAYSIZE(attachments);
             framebufferCreateInfo.pAttachments = attachments;
-            framebufferCreateInfo.width = vulkanSwapChainExtent.width;
-            framebufferCreateInfo.height = vulkanSwapChainExtent.height;
+            framebufferCreateInfo.width = swapchain.extent.width;
+            framebufferCreateInfo.height = swapchain.extent.height;
             framebufferCreateInfo.layers = 1;
 
-            VkResult errorCode = vkCreateFramebuffer( vulkanLogicalDevice, &framebufferCreateInfo, nullptr, &vulkanSwapchainFramebuffers[i]);
+            VkResult errorCode = vkCreateFramebuffer( vulkanLogicalDevice, &framebufferCreateInfo, nullptr, &swapchain.framebuffers[i]);
             if(errorCode)
             {
                 LogError("Vulkan: [Error] vkCreateFramebuffer() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
@@ -1952,7 +1912,7 @@ namespace VkApplication
         bufferInfo.usage = usage;       // Purpose of buffer (can specify multiple purposes).
         bufferInfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
 
-        QueueFamilyIndices indices = FindQueueFamilies(vulkanPhysicalDevice);
+        vk_types::SQueueFamilyIndices indices = FindQueueFamilies(vulkanPhysicalDevice);
         uint32_t queueFamiliesIndices[] = { indices.graphicsFamily, indices.transferFamily};
         bufferInfo.queueFamilyIndexCount = 2;
         bufferInfo.pQueueFamilyIndices = queueFamiliesIndices;
@@ -2040,14 +2000,16 @@ namespace VkApplication
         vkUnmapMemory(vulkanLogicalDevice, stagingBufferMemory);
         data = nullptr;
 
-        if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanVertexBuffer, vulkanVertexBufferMemory))
+        if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer.m_Buffer, vertexBuffer.m_Memory))
         {
             LogError("[Error] CreateBuffer() Failed.");
             return false;
         }
 
+        vertexBuffer.m_DataSize = bufferSize;
+
         // copy data from staging buffer to vertex buffer
-        CopyBuffer(stagingBuffer, vulkanVertexBuffer, bufferSize);
+        CopyBuffer(stagingBuffer, vertexBuffer.m_Buffer, bufferSize);
 
         // Cleanup
         vkDestroyBuffer( vulkanLogicalDevice, stagingBuffer, nullptr);
@@ -2056,7 +2018,7 @@ namespace VkApplication
         vkFreeMemory(vulkanLogicalDevice, stagingBufferMemory, nullptr);
         stagingBufferMemory = nullptr;
 
-        LogSuccess("Vulkan: [Success] Create Vertex Buffer and Memory allocated.");
+        LogSuccess("Vulkan: [Success] Create SVertex Buffer and Memory allocated.");
         return true;
     }
 
@@ -2083,14 +2045,16 @@ namespace VkApplication
         vkUnmapMemory(vulkanLogicalDevice, stagingBufferMemory);
 
         // Create Indices buffers
-        if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanIndexBuffer, vulkanIndexBufferMemory))
+        if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer.m_Buffer, indexBuffer.m_Memory))
         {
             LogError("[Error] CreateBuffer() Failed.");
             return false;
         }
 
+        indexBuffer.m_DataSize = bufferSize;
+
         // Copy data from staging buffer to index buffer
-        CopyBuffer(stagingBuffer, vulkanIndexBuffer, bufferSize);
+        CopyBuffer(stagingBuffer, indexBuffer.m_Buffer, bufferSize);
 
         // Cleanup
         vkDestroyBuffer( vulkanLogicalDevice, stagingBuffer, nullptr);
@@ -2099,7 +2063,7 @@ namespace VkApplication
         vkFreeMemory(vulkanLogicalDevice, stagingBufferMemory, nullptr);
         stagingBufferMemory = nullptr;
 
-        LogSuccess("Vulkan: [Success] Create Vertex Buffer and Memory allocated.");
+        LogSuccess("Vulkan: [Success] Create SVertex Buffer and Memory allocated.");
         return true;
     }
 
@@ -2109,17 +2073,34 @@ namespace VkApplication
     static bool CreateUniformBuffer()
     {
         // code
-        VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+        VkDeviceSize bufferSize = sizeof(SUniformBufferObject);
 
-        for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        // For Each Game Object
+        for(vk_types::SGameObject& gameObject : gameObjects)
         {
-            if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, vulkanUniformBuffers[i], vulkanUniformBuffersMemory[i]))
-            {
-                LogError("[Error] CreateBuffer() Failed for Uniform at %d.", (int)i);
-                return false;
-            }
+            gameObject.uniformBuffers.clear();
+            gameObject.uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
-            vkMapMemory(vulkanLogicalDevice, vulkanUniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+            // Create uniform buffers for each frame in flight
+            for(size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+            {
+                VkBuffer buffer = VK_NULL_HANDLE;
+                VkDeviceMemory memory = VK_NULL_HANDLE;
+                void *mappedMemory = nullptr;
+
+                gameObject.uniformBuffers[i].m_DataSize = bufferSize;
+                if(!CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, buffer, memory))
+                {
+                    LogError("[Error] CreateBuffer() Failed for Uniform at %d.", (int)i);
+                    return false;
+                }
+
+                vkMapMemory(vulkanLogicalDevice, memory, 0, bufferSize, 0, &mappedMemory);
+
+                gameObject.uniformBuffers[i].m_Buffer = std::move(buffer);
+                gameObject.uniformBuffers[i].m_Memory = std::move(memory);
+                gameObject.uniformBuffers[i].m_Mapped = std::move(mappedMemory);
+            }
         }
 
         return true;
@@ -2253,7 +2234,7 @@ namespace VkApplication
         imageInfo.samples       = numSamples;
         imageInfo.flags         = 0;
 
-        QueueFamilyIndices indices = FindQueueFamilies(vulkanPhysicalDevice);
+        vk_types::SQueueFamilyIndices indices = FindQueueFamilies(vulkanPhysicalDevice);
         uint32_t queuFamilyIndices[] = { indices.graphicsFamily, indices.transferFamily};
 
         imageInfo.queueFamilyIndexCount = 2;
@@ -2447,21 +2428,21 @@ namespace VkApplication
         pixels = nullptr;
 
         // Create texture
-        if( !CreateImage2D( static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), textureMipLevels, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanTextureImage, vulkanTextureImageMemory))
+        if( !CreateImage2D( static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), textureMipLevels, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, blackcliff_amulet_texture.m_Image, blackcliff_amulet_texture.m_Memory))
         {
             LogError("[Error] CreateImage2D() Failed.");
             return false;
         }
 
         // Transition image layout as destination for transfer.
-        if(!TransitionImageLayout( vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, textureMipLevels))
+        if(!TransitionImageLayout( blackcliff_amulet_texture.m_Image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, textureMipLevels))
         {
             LogError("[Error] TransitionImageLayout() Failed.");
             return false;
         }
 
         // Copy data from staging buffer to image.
-        CopyBufferToImage(stagingBuffer, vulkanTextureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+        CopyBufferToImage(stagingBuffer, blackcliff_amulet_texture.m_Image, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
 
         // // Transition image layout to start sampling from the texture image in the shader.
         // if(!TransitionImageLayout(vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, textureMipLevels))
@@ -2471,7 +2452,7 @@ namespace VkApplication
         // }
 
         // Generate Mipmaps
-        if(!GenerateMipmaps(vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, textureMipLevels))
+        if(!GenerateMipmaps(blackcliff_amulet_texture.m_Image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, textureMipLevels))
         {
             LogError("[Error] GenerateMipmaps() Failed.");
             return false;
@@ -2492,7 +2473,7 @@ namespace VkApplication
     static bool CreateTextureImageView()
     {
         // code
-        if(!CreateImageView(vulkanTextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, textureMipLevels, &vulkanTextureImageView))
+        if(!CreateImageView(blackcliff_amulet_texture.m_Image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, textureMipLevels, &blackcliff_amulet_texture.m_View))
         {
             LogError("[Error] CreateImageView() Failed.");
             return false;
@@ -2551,7 +2532,7 @@ namespace VkApplication
         samplerInfo.minLod = 0.0f; //static_cast<float>(textureMipLevels / 2);;
         samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
 
-        VkResult errorCode = vkCreateSampler(vulkanLogicalDevice, &samplerInfo, nullptr, &vulkanTextureSampler);
+        VkResult errorCode = vkCreateSampler(vulkanLogicalDevice, &samplerInfo, nullptr, &textureSampler);
         if(errorCode)
         {
             Log("[Error] vkCreateSampler() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
@@ -2569,18 +2550,16 @@ namespace VkApplication
     static bool CreateDescriptorPool()
     {
         // code
-        VkDescriptorPoolSize poolSizes[2]{};
-        poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-
-        poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        VkDescriptorPoolSize poolSizes[] = {
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * MAX_OBJECTS },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * MAX_OBJECTS}
+        };
 
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolInfo.poolSizeCount = _ARRAYSIZE(poolSizes);
         poolInfo.pPoolSizes = poolSizes;
-        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * MAX_OBJECTS;
 
         VkResult errorCode = vkCreateDescriptorPool(vulkanLogicalDevice, &poolInfo, nullptr, &vulkanDescriptorPool);
         if(errorCode)
@@ -2598,61 +2577,63 @@ namespace VkApplication
     static bool CreateDescriptorSets()
     {
         // code
-        VkDescriptorSetLayout layouts[MAX_FRAMES_IN_FLIGHT];
-        for( int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, vulkanDescriptorSetLayout);
+
+        for(vk_types::SGameObject& gameObject : gameObjects)
         {
-            layouts[i] = vulkanDescriptorSetLayout;
-        }
+            VkDescriptorSetAllocateInfo allocInfo{};
+            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocInfo.descriptorPool = vulkanDescriptorPool;
+            allocInfo.descriptorSetCount = static_cast<uint32_t>(layouts.size());
+            allocInfo.pSetLayouts = layouts.data();
 
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = vulkanDescriptorPool;
-        allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-        allocInfo.pSetLayouts = layouts;
-        
-        VkResult errorCode = vkAllocateDescriptorSets(vulkanLogicalDevice, &allocInfo, vulkanDescriptorSets);
-        if(errorCode)
-        {
-            Log("vkAllocateDescriptorSets() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
-            return false;
-        }
+            gameObject.descriptorSets.clear();
+            gameObject.descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
 
-        // Configure Desciptor
-        for( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-        {
-            VkDescriptorBufferInfo bufferInfo{};
-            bufferInfo.buffer = vulkanUniformBuffers[i];
-            bufferInfo.offset = 0;
-            bufferInfo.range = sizeof(UniformBufferObject);
+            VkResult errorCode = vkAllocateDescriptorSets(vulkanLogicalDevice, &allocInfo, gameObject.descriptorSets.data());
+            if(errorCode)
+            {
+                Log("vkAllocateDescriptorSets() Failed. %s", VulkanHelper::GetVulkanErrorCodeString(errorCode));
+                return false;
+            }
 
-            // Bind Image And Texture
-            VkDescriptorImageInfo imageInfo;
-            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageInfo.imageView = vulkanTextureImageView;
-            imageInfo.sampler = vulkanTextureSampler;
+            // Configure Desciptor
+            for( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+            {
+                VkDescriptorBufferInfo bufferInfo{};
+                bufferInfo.buffer = gameObject.uniformBuffers[i].m_Buffer;
+                bufferInfo.offset = 0;
+                bufferInfo.range = sizeof(SUniformBufferObject);
 
-            VkWriteDescriptorSet descriptorWrite[2]{};
-            descriptorWrite[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrite[0].dstSet = vulkanDescriptorSets[i];
-            descriptorWrite[0].dstBinding = 0;
-            descriptorWrite[0].dstArrayElement = 0;
-            descriptorWrite[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            descriptorWrite[0].descriptorCount = 1;
-            descriptorWrite[0].pBufferInfo = &bufferInfo;
-            descriptorWrite[0].pImageInfo = nullptr;
-            descriptorWrite[0].pTexelBufferView = nullptr;
+                // Bind Image And Texture
+                VkDescriptorImageInfo imageInfo;
+                imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                imageInfo.imageView = blackcliff_amulet_texture.m_View;
+                imageInfo.sampler = textureSampler;
 
-            descriptorWrite[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrite[1].dstSet = vulkanDescriptorSets[i];
-            descriptorWrite[1].dstBinding = 1;
-            descriptorWrite[1].dstArrayElement = 0;
-            descriptorWrite[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrite[1].descriptorCount = 1;
-            descriptorWrite[1].pImageInfo = &imageInfo;
-            descriptorWrite[1].pBufferInfo = nullptr;
-            descriptorWrite[1].pTexelBufferView = nullptr;
+                VkWriteDescriptorSet descriptorWrite[2]{};
+                descriptorWrite[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                descriptorWrite[0].dstSet = gameObject.descriptorSets[i];
+                descriptorWrite[0].dstBinding = 0;
+                descriptorWrite[0].dstArrayElement = 0;
+                descriptorWrite[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                descriptorWrite[0].descriptorCount = 1;
+                descriptorWrite[0].pBufferInfo = &bufferInfo;
+                descriptorWrite[0].pImageInfo = nullptr;
+                descriptorWrite[0].pTexelBufferView = nullptr;
 
-            vkUpdateDescriptorSets(vulkanLogicalDevice, _ARRAYSIZE(descriptorWrite), descriptorWrite, 0, nullptr);
+                descriptorWrite[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                descriptorWrite[1].dstSet = gameObject.descriptorSets[i];
+                descriptorWrite[1].dstBinding = 1;
+                descriptorWrite[1].dstArrayElement = 0;
+                descriptorWrite[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                descriptorWrite[1].descriptorCount = 1;
+                descriptorWrite[1].pImageInfo = &imageInfo;
+                descriptorWrite[1].pBufferInfo = nullptr;
+                descriptorWrite[1].pTexelBufferView = nullptr;
+
+                vkUpdateDescriptorSets(vulkanLogicalDevice, _ARRAYSIZE(descriptorWrite), descriptorWrite, 0, nullptr);
+            }
         }
 
         return true;
@@ -2689,17 +2670,17 @@ namespace VkApplication
     static bool CreateColorResources()
     {
         // code
-        VkFormat colorFormat = vulkanSwapChainImageFormat;
+        VkFormat colorFormat = swapchain.imageFormat;
 
-        if(!CreateImage2D( vulkanSwapChainExtent.width, vulkanSwapChainExtent.height, 1, msaaSamplesCount, colorFormat,
+        if(!CreateImage2D( swapchain.extent.width, swapchain.extent.height, 1, msaaSamplesCount, colorFormat,
             VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanMSAAColorImage, vulkanMSAAColorImageMemory))
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, msaaColorTexture.m_Image, msaaColorTexture.m_Memory))
         {
             LogError("[Error] CreateImage2D() Failed.");
             return false;
         }
 
-        if(!CreateImageView(vulkanMSAAColorImage, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, &vulkanMSAAColorImageView))
+        if(!CreateImageView(msaaColorTexture.m_Image, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1, &msaaColorTexture.m_View))
         {
             LogError("[Error] CreateImageView() Failed.");
             return false;
@@ -2737,24 +2718,22 @@ namespace VkApplication
     static bool CreateDepthResources()
     {
         // code
-        VkFormat depthFormat = FindDepthFormat();
-        
         if(!CreateImage2D(
-            vulkanSwapChainExtent.width, vulkanSwapChainExtent.height, 1, msaaSamplesCount, depthFormat,
+            swapchain.extent.width, swapchain.extent.height, 1, msaaSamplesCount, swapchain.depthFormat,
             VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vulkanDepthImage, vulkanDepthImageMemory))
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, swapchain.depthTexture.m_Image, swapchain.depthTexture.m_Memory))
         {
             LogError("[Error] CreateImage2D() Failed.");
             return false;
         }
         
-        if(!CreateImageView(vulkanDepthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, &vulkanDepthImageView))
+        if(!CreateImageView(swapchain.depthTexture.m_Image, swapchain.depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1, &swapchain.depthTexture.m_View))
         {
             LogError("[Error] CreateImageView() Failed.");
             return false;
         }
 
-        if(!TransitionImageLayout(vulkanDepthImage, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1))
+        if(!TransitionImageLayout(swapchain.depthTexture.m_Image, swapchain.depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1))
         {
             LogError("[Error] TransitionImageLayout() Failed.");
             return false;
@@ -2781,14 +2760,14 @@ namespace VkApplication
             return false;
         }
 
-        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+        std::unordered_map<vk_types::SVertex, uint32_t> uniqueVertices{};
 
         // We are combining all faces in the file into a single model.
         for(const tinyobj::shape_t& shape : shapes)
         {
             for(const tinyobj::index_t& index : shape.mesh.indices)
             {
-                Vertex vertex;
+                vk_types::SVertex vertex;
 
                 vertex.position =
                 {
@@ -2824,6 +2803,27 @@ namespace VkApplication
     }
 
     /**
+     * @brief SetupGameObjects()
+     */
+    static void SetupGameObjects()
+    {
+        // Object 1 - Center
+        gameObjects[0].position = { 0.0f, 0.0f, 0.0f };
+        gameObjects[0].rotation = { 0.0f, 0.0f, 0.0f };
+        gameObjects[0].scale    = { 0.75f, 0.75f, 0.75f };
+
+        // Object 1 - Left
+        gameObjects[1].position = { -3.0f, 0.0f, 0.0f };
+        gameObjects[1].rotation = { 0.0f, glm::radians(45.0f), 0.0f };
+        gameObjects[1].scale    = { 0.75f, 0.75f, 0.75f };
+
+        // Object 1 - Right
+        gameObjects[2].position = { 3.0f, 0.0f, 0.0f };
+        gameObjects[2].rotation = { 0.0f, 0.0f, glm::radians(-45.0f) };
+        gameObjects[2].scale    = { 0.75f, 0.75f, 0.75f };
+    }
+
+    /**
      * @brief Initialize()
      */
     bool Initialize(HWND hwnd)
@@ -2856,6 +2856,9 @@ namespace VkApplication
         // Setup Logical Device
         CHECK_FUNCTION_RETURN(CreateVulkanLogicalDevice());
 
+        // Get Depth Format
+        swapchain.depthFormat = FindDepthFormat();
+
         // Create Swap Chain
         CHECK_FUNCTION_RETURN(CreateVulkanSwapChain());
 
@@ -2872,7 +2875,7 @@ namespace VkApplication
         CHECK_FUNCTION_RETURN(CreateVulkanGraphicsPipeline());
 
         // Create Vulkan Command Pool
-        QueueFamilyIndices queueFamilyIndices = FindQueueFamilies(vulkanPhysicalDevice);
+        vk_types::SQueueFamilyIndices queueFamilyIndices = FindQueueFamilies(vulkanPhysicalDevice);
             // we will be recording a command buffer every frame, so we want to be able to reset and rerecord over it.
             // We're going to record commands for drawing, which is why we've chosen the graphics queue family.
         CHECK_FUNCTION_RETURN(CreateVulkanCommandPool(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, queueFamilyIndices.graphicsFamily, vulkanGraphicsCommandPool));
@@ -2900,8 +2903,9 @@ namespace VkApplication
 
         // Load Model
         CHECK_FUNCTION_RETURN(LoadModel());
+        SetupGameObjects();
 
-        // Create Vertex Buffer
+        // Create SVertex Buffer
         CHECK_FUNCTION_RETURN(CreateVertexBuffer());
 
         // Create Index Buffer
@@ -2933,7 +2937,7 @@ namespace VkApplication
     void ResizeCallback(int width, int height)
     {
         // code
-        framebufferResized = true;  // Handling Resize Explicitly
+        swapchain.framebufferResized = true;  // Handling Resize Explicitly
     }
 
     /**
@@ -2942,7 +2946,7 @@ namespace VkApplication
     static void CleanupSwapChain()
     {
         // code
-        for(VkFramebuffer& framebuffer : vulkanSwapchainFramebuffers)
+        for(VkFramebuffer& framebuffer : swapchain.framebuffers)
         {
             if(framebuffer)
             {
@@ -2951,7 +2955,7 @@ namespace VkApplication
             }
         }
 
-        for(VkImageView& imageView : vulkanSwapChainImageViews)
+        for(VkImageView& imageView : swapchain.imageViews)
         {
             if(imageView)
             {
@@ -2960,47 +2964,14 @@ namespace VkApplication
             }
         }
 
-        if(vulkanSwapChain)
+        if(swapchain.handle)
         {
-            vkDestroySwapchainKHR(vulkanLogicalDevice, vulkanSwapChain, nullptr);
-            vulkanSwapChain = nullptr;
+            vkDestroySwapchainKHR(vulkanLogicalDevice, swapchain.handle, nullptr);
+            swapchain.handle = nullptr;
         }
 
-        if(vulkanDepthImageView)
-        {
-            vkDestroyImageView(vulkanLogicalDevice, vulkanDepthImageView, nullptr);
-            vulkanDepthImageView = nullptr;
-        }
-
-        if(vulkanDepthImage)
-        {
-            vkDestroyImage(vulkanLogicalDevice, vulkanDepthImage, nullptr);
-            vulkanDepthImage = nullptr;
-        }
-
-        if(vulkanDepthImageMemory)
-        {
-            vkFreeMemory(vulkanLogicalDevice, vulkanDepthImageMemory, nullptr);
-            vulkanDepthImageMemory = nullptr;
-        }
-
-        if(vulkanMSAAColorImageView)
-        {
-            vkDestroyImageView(vulkanLogicalDevice, vulkanMSAAColorImageView, nullptr);
-            vulkanMSAAColorImageView = nullptr;
-        }
-
-        if(vulkanMSAAColorImage)
-        {
-            vkDestroyImage(vulkanLogicalDevice, vulkanMSAAColorImage, nullptr);
-            vulkanMSAAColorImage = nullptr;
-        }
-
-        if(vulkanMSAAColorImageMemory)
-        {
-            vkFreeMemory(vulkanLogicalDevice, vulkanMSAAColorImageMemory, nullptr);
-            vulkanMSAAColorImageMemory = nullptr;
-        }
+        swapchain.depthTexture.Destroy(vulkanLogicalDevice);
+        msaaColorTexture.Destroy(vulkanLogicalDevice);
     }
 
     /**
@@ -3043,7 +3014,6 @@ namespace VkApplication
     static bool RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex /* current swap chain image we want to write to. */)
     {
         // code
-
             // We always begin recording a command buffer by calling 'vkBeginCommandBuffer()'.
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -3063,11 +3033,11 @@ namespace VkApplication
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         renderPassInfo.renderPass = vulkanRenderPass;
-        renderPassInfo.framebuffer = vulkanSwapchainFramebuffers[imageIndex];   // framebuffer for the swapchain image we want to draw to.
+        renderPassInfo.framebuffer = swapchain.framebuffers[imageIndex];   // framebuffer for the swapchain image we want to draw to.
 
             // Specify size of the render area.
         renderPassInfo.renderArea.offset = { 0, 0};
-        renderPassInfo.renderArea.extent = vulkanSwapChainExtent;
+        renderPassInfo.renderArea.extent = swapchain.extent;
 
         // last two parameters define the clear values to use for 'VK_ATTACHMENT_LOAD_OP_CLEAR' which is used as
         // load operation for the color attachment.
@@ -3096,39 +3066,39 @@ namespace VkApplication
         // VK_SUBPASS_CONTENTS_INLINE : The render pass commands will be embedded in the primary command buffer itself and no secondary buffers will be executed.
         // VK_SUBPASS_CONTENTS_SECONDARY_COMMNAD_BUFFERS : The render pass commands will be executed from secondary command buffers.
 
-
-////////////// Drawing Commands
-        // Bind Graphics Pipeline :- We now told Vulkan which operations to execute in the graphics pipeline and which attachment to use in the fragment shader.
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanGraphicsPipeline);
-
-        // We already specify viewport and scissor state for this pipeline to be dyanmic. So we need to set them in command buffer
+         // We already specify viewport and scissor state for this pipeline to be dyanmic. So we need to set them in command buffer
         VkViewport viewport{};
         viewport.x = 0.0f;
         viewport.y = 0.0f;
-        viewport.width = static_cast<float>(vulkanSwapChainExtent.width);
-        viewport.height = static_cast<float>(vulkanSwapChainExtent.height);
+        viewport.width = static_cast<float>(swapchain.extent.width);
+        viewport.height = static_cast<float>(swapchain.extent.height);
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
         vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
         VkRect2D scissor{};
         scissor.offset = { 0, 0};
-        scissor.extent = vulkanSwapChainExtent;
+        scissor.extent = swapchain.extent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        // Bind Descriptor
-        vkCmdBindDescriptorSets( commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanPipelineLayout, 0, 1, &vulkanDescriptorSets[currentFrame], 0, nullptr);
+////////////// Drawing Commands
+        // Bind Graphics Pipeline :- We now told Vulkan which operations to execute in the graphics pipeline and which attachment to use in the fragment shader.
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanGraphicsPipeline);
 
-        // Bind Vertex Buffer
-        VkBuffer vertexBuffers[] = {vulkanVertexBuffer};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        // Bind Buffer
+        VkDeviceSize offsets[] = { 0 };
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer.m_Buffer, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, indexBuffer.m_Buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        // Bind Index buffer
-        vkCmdBindIndexBuffer(commandBuffer, vulkanIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        // Draw each object with its own descriptor set
+        for(const vk_types::SGameObject& gameObject : gameObjects)
+        {
+            // Bind Descriptor
+            vkCmdBindDescriptorSets( commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkanPipelineLayout, 0, 1, &gameObject.descriptorSets[currentFrame], 0, nullptr);
 
-        // Draw Command
-        vkCmdDrawIndexed( commandBuffer, /* indexCount */ static_cast<uint32_t>(indices.size()), /* instanceCount */ 1, /* firstIndex */ 0, /* vertexOffset */ 0, /* firstInstance */ 0);
+            // Draw Command
+            vkCmdDrawIndexed( commandBuffer, /* indexCount */ static_cast<uint32_t>(indices.size()), /* instanceCount */ 1, /* firstIndex */ 0, /* vertexOffset */ 0, /* firstInstance */ 0);
+        }
 
 ////////////// Finishing Up
         // The render pass can now be ended.
@@ -3148,7 +3118,7 @@ namespace VkApplication
     /**
      * @brief UpdateUnifrmBuffer()
      */
-    static void UpdateUnifrmBuffer(uint32_t currentImage)
+    static void UpdateUniformBuffer(uint32_t currentImage)
     {
         // code
         static std::chrono::steady_clock::time_point startTime = std::chrono::high_resolution_clock::now();
@@ -3156,17 +3126,31 @@ namespace VkApplication
         std::chrono::steady_clock::time_point currentTime = std::chrono::high_resolution_clock::now();
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-        UniformBufferObject ubo{};
-        ubo.modelMatrix = glm::rotate(glm::mat4(1.0f), time * glm::radians(10.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.viewMatrix = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.projectionMatrix = glm::perspective(glm::radians(45.0f), vulkanSwapChainExtent.width / (float)vulkanSwapChainExtent.height, 0.1f, 10.0f);
-
+        glm::mat4 view = glm::lookAt(glm::vec3(0.0f, 2.0f, 8.f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 proj = glm::perspective(glm::radians(45.0f), swapchain.extent.width / (float)swapchain.extent.height, 0.1f, 20.0f);
             // GLM was originally designed for OpenGL, where teh U coordinate of the clip coordinates is inverted. The easiest way to
             // compendate for that is to flip the sign on the scaling factor of the Y axis in the projection matrix.
-        ubo.projectionMatrix[1][1] *= -1;
+        proj[1][1] *= -1;
 
-        // copy data to uniform buffer
-        memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+        for(vk_types::SGameObject& gameObject : gameObjects)
+        {
+                // Apply continous buffers for each object
+            gameObject.rotation.y += 0.001f;
+
+                // Get the model matrix for this object
+            glm::mat4 initialRotation = glm::rotate(glm::mat4(1.0f), time * glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+            glm::mat4 model = gameObject.getModelMatrix() * initialRotation;
+
+                // Create and update the UBO
+            SUniformBufferObject ubo = {
+                model,
+                view,
+                proj
+            };
+
+            // copy data to uniform buffer
+            memcpy(gameObject.uniformBuffers[currentImage].m_Mapped, &ubo, sizeof(ubo));
+        }
     }
 
     /**
@@ -3179,7 +3163,7 @@ namespace VkApplication
 
     // Acquiring and image from the swap chain.
         uint32_t imageIndex;
-        VkResult result = vkAcquireNextImageKHR( vulkanLogicalDevice, vulkanSwapChain, UINT64_MAX /* timeout in nanoseconds for an image to become available (disable timeout here)*/, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+        VkResult result = vkAcquireNextImageKHR( vulkanLogicalDevice, swapchain.handle, UINT64_MAX /* timeout in nanoseconds for an image to become available (disable timeout here)*/, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
 
     // Check if swap chain has become incompatible with the surface and can no longer be used for rendering. (Usually happen for resize).
         if(result == VK_ERROR_OUT_OF_DATE_KHR)
@@ -3203,7 +3187,7 @@ namespace VkApplication
         RecordCommandBuffer(vulkanCommandBuffers[currentFrame], imageIndex);
 
     // Update Uniforms
-        UpdateUnifrmBuffer(currentFrame);
+        UpdateUniformBuffer(currentFrame);
 
     //  Submitting the command buffer
         VkSubmitInfo submitInfo{};
@@ -3237,21 +3221,20 @@ namespace VkApplication
         presentInfo.waitSemaphoreCount = 1;
         presentInfo.pWaitSemaphores = signalSemaphores;
 
-        VkSwapchainKHR swapchains[] = { vulkanSwapChain};
         presentInfo.swapchainCount = 1;
-        presentInfo.pSwapchains = swapchains;
+        presentInfo.pSwapchains = &swapchain.handle;
         presentInfo.pImageIndices = &imageIndex;
         presentInfo.pResults = nullptr;
 
         result = vkQueuePresentKHR(vulkanPresentationQueue, &presentInfo);
 
         // Check if swap chain has become incompatible with the surface and can no longer be used for rendering. (Usually happen for resize).
-        if(framebufferResized)
+        if(swapchain.framebufferResized)
         {
-            framebufferResized = false;
-
             // recreate swap chain and try again in next DrawFrame() call.
             RecreateSwapChain();
+
+            swapchain.framebufferResized = false;
             return;
         }
         else if(result != VK_SUCCESS)
@@ -3279,45 +3262,32 @@ namespace VkApplication
 
         CleanupSwapChain();
 
-        if(vulkanTextureSampler)
+        if(textureSampler)
         {
-            vkDestroySampler(vulkanLogicalDevice, vulkanTextureSampler, nullptr);
-            vulkanTextureSampler = nullptr;
+            vkDestroySampler(vulkanLogicalDevice, textureSampler, nullptr);
+            textureSampler = nullptr;
         }
 
-        if(vulkanTextureImageView)
-        {
-            vkDestroyImageView(vulkanLogicalDevice, vulkanTextureImageView, nullptr);
-            vulkanTextureImageView = nullptr;
-        }
+        blackcliff_amulet_texture.Destroy(vulkanLogicalDevice);
 
-        if(vulkanTextureImage)
+        for(vk_types::SGameObject& gameObject : gameObjects)
         {
-            vkDestroyImage(vulkanLogicalDevice, vulkanTextureImage, nullptr);
-            vulkanTextureImage = nullptr;
-        }
-
-        if(vulkanTextureImageMemory)
-        {
-            vkFreeMemory(vulkanLogicalDevice, vulkanTextureImageMemory, nullptr);
-            vulkanTextureImageMemory = nullptr;
-        }
-
-        for(uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-        {
-            if(vulkanUniformBuffers[i])
+            for(uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
             {
-                vkDestroyBuffer(vulkanLogicalDevice, vulkanUniformBuffers[i], nullptr);
-                vulkanUniformBuffers[i] = nullptr;
-            }
+                if(gameObject.uniformBuffers[i].m_Buffer)
+                {
+                    vkDestroyBuffer(vulkanLogicalDevice, gameObject.uniformBuffers[i].m_Buffer, nullptr);
+                    gameObject.uniformBuffers[i].m_Buffer = VK_NULL_HANDLE;
+                }
 
-            if(vulkanUniformBuffersMemory[i])
-            {
-                vkUnmapMemory(vulkanLogicalDevice, vulkanUniformBuffersMemory[i]);
-                uniformBuffersMapped[i] = nullptr;
+                if(gameObject.uniformBuffers[i].m_Memory)
+                {
+                    vkUnmapMemory(vulkanLogicalDevice, gameObject.uniformBuffers[i].m_Memory);
+                    gameObject.uniformBuffers[i].m_Mapped = nullptr;
 
-                vkFreeMemory(vulkanLogicalDevice, vulkanUniformBuffersMemory[i], nullptr);
-                vulkanUniformBuffersMemory[i] = nullptr;
+                    vkFreeMemory(vulkanLogicalDevice, gameObject.uniformBuffers[i].m_Memory, nullptr);
+                    gameObject.uniformBuffers[i].m_Memory = nullptr;
+                }
             }
         }
 
@@ -3333,29 +3303,8 @@ namespace VkApplication
             vulkanDescriptorSetLayout = nullptr;
         }
 
-        if(vulkanVertexBuffer)
-        {
-            vkDestroyBuffer(vulkanLogicalDevice, vulkanVertexBuffer, nullptr);
-            vulkanVertexBuffer = nullptr;
-        }
-
-        if(vulkanVertexBufferMemory)
-        {
-            vkFreeMemory(vulkanLogicalDevice, vulkanVertexBufferMemory, nullptr);
-            vulkanVertexBufferMemory = nullptr;
-        }
-
-        if(vulkanIndexBuffer)
-        {
-            vkDestroyBuffer(vulkanLogicalDevice, vulkanIndexBuffer, nullptr);
-            vulkanIndexBuffer = nullptr;
-        }
-
-        if(vulkanIndexBufferMemory)
-        {
-            vkFreeMemory(vulkanLogicalDevice, vulkanIndexBufferMemory, nullptr);
-            vulkanIndexBufferMemory = nullptr;
-        }
+        vertexBuffer.Destroy(vulkanLogicalDevice);
+        indexBuffer.Destroy(vulkanLogicalDevice);
 
         for(uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
         {

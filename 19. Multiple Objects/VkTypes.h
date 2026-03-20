@@ -175,7 +175,7 @@ namespace vk_types
         glm::vec3 scale = { 1.f, 1.f, 1.f };
 
         // Uniform Buffer
-        std::vector<SVulkanUniformBuffer>   uniformBuffers{};
+        std::vector<SVulkanUniformBuffer> uniformBuffers{};
 
         // Descriptor sets for this object (one per frame in flight)
         std::vector<VkDescriptorSet> descriptorSets;
