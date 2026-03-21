@@ -2078,6 +2078,11 @@ namespace VkApplication
         // For Each Game Object
         for(vk_types::SGameObject& gameObject : gameObjects)
         {
+            for(vk_types::SVulkanUniformBuffer& ubuffer : gameObject.uniformBuffers)
+            {
+                ubuffer.Destroy(vulkanLogicalDevice);
+            }
+
             gameObject.uniformBuffers.clear();
             gameObject.uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
