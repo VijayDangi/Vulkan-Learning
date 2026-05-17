@@ -116,7 +116,7 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInsatnce, LPSTR szCmdLin
             Update(0.0f);
         }
     }
-    
+
     UnInitialize();
 
     UnregisterClass( szClassName, hInstance);
@@ -180,7 +180,9 @@ LRESULT CALLBACK WndProc( HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
     void Resize( int, int);
     void ToggleFullScreen( void);
     void UnInitialize( void);
-    
+
+    extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
     //variables
 	static int mousePosX, mousePosY;
 	static int iAccumDelta, zDelta;
@@ -194,6 +196,21 @@ LRESULT CALLBACK WndProc( HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 	POINT pt;
     
     //code
+    if(ImGui_ImplWin32_WndProcHandler(hwnd, message, wParam, lParam))
+    {
+        return true;
+    }
+
+    if(ImGui::GetCurrentContext() != nullptr)
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        // if(io.WantCaptureKeyboard || io.WantCaptureMouse)
+        if(io.WantCaptureMouse)
+        {
+            return true;
+        }
+    }
+
     switch(message)
     {
         case WM_SETFOCUS:
@@ -234,10 +251,6 @@ LRESULT CALLBACK WndProc( HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         case WM_LBUTTONUP:
             ReleaseCapture();
-        break;
-        
-        case WM_CLOSE:
-            UnInitialize();
         break;
         
         case WM_DESTROY:
@@ -365,7 +378,7 @@ void UnInitialize( void)
 
     //
     VkApplication::Uninitialize();
-    
+
     if(ghdc)
     {
         ReleaseDC( ghwnd, ghdc);

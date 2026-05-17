@@ -1,6 +1,46 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
+#include <Windows.h>
+
+#ifndef IMGUI_DEFINE_MATH_OPERATORS
+    #define IMGUI_DEFINE_MATH_OPERATORS
+#endif
+
+#define VK_USE_PLATFORM_WIN32_KHR   // Used to include <vulkan/vulkan_win32.h>
+#include <vulkan/vulkan.h>
+
+#include <imgui.h>
+#include <imgui_impl_win32.h>
+#include <imgui_impl_vulkan.h>
+
+#include <iostream>
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+#define VX_FRAMEWORK_NAMESPACE vxs
+
+#define VK_UTIL_FN_ERROR_CHECK(x) \
+    {   \
+        VkResult errorCode = x; \
+        if( errorCode != VK_SUCCESS)    \
+        {   \
+            LogError("Vulkan: [Error] " #x " Failed. %s", VX_FRAMEWORK_NAMESPACE::helper::GetVulkanErrorCodeString(errorCode));   \
+        }   \
+    }
+
+#define VK_UTIL_FN_ERROR_CHECK_RETURN(x, return_on_failed) \
+    {   \
+        VkResult errorCode = x; \
+        if( errorCode != VK_SUCCESS)    \
+        {   \
+            LogError("Vulkan: [Error] " #x " Failed. %s", VX_FRAMEWORK_NAMESPACE::helper::GetVulkanErrorCodeString(errorCode));   \
+            return return_on_failed;    \
+        }   \
+    }
+
+
 #define LOG_CONSOLE_TEXT_WHITE_COLOR    0
 #define LOG_CONSOLE_BKG_BLACK_COLOR     0
 
@@ -42,6 +82,9 @@
 
 #define LogError(fmt, ...) \
         PrintLog(LOG_CONSOLE_DARK_TEXT_RED_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
+
+#define LogDebug(fmt, ...) \
+        PrintLog(LOG_CONSOLE_DARK_TEXT_GREEN_COLOR, LOG_CONSOLE_LIGHT_BKG_WHITE_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
 
 #define LogWarning(fmt, ...) \
         PrintLog(LOG_CONSOLE_LIGHT_TEXT_YELLOW_COLOR, LOG_CONSOLE_BKG_BLACK_COLOR, __LINE__, __FILE__, __FUNCTION__, fmt, __VA_ARGS__)
