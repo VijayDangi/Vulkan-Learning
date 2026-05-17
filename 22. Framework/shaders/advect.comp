@@ -1,0 +1,117 @@
+#version 450
+
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Particle
+{
+    vec4 position;
+    vec4 velocity;
+    float age;
+    float maxAge;
+    vec2 padding;
+};
+
+layout (std430, set = 0, binding = 0) readonly buffer InputParticleBuffer
+{
+    Particle particlesIn[];
+};
+
+layout (std430, set = 0, binding = 1) writeonly buffer OutputParticleBuffer
+{
+    Particle particlesOut[];
+};
+
+layout (binding = 2) uniform ParameterUBO
+{
+    float time;
+    float deltaTime;
+    float minAABB;
+    float maxAABB;
+} ubo;
+
+vec3 GetVelocity(vec3 position)
+{
+    // return vec3( sin(position.y * 2.0), cos(position.z * 2.0), sin(position.x * 2.0) );
+
+
+    // vec3 v = vec3(0.0);
+    
+    // // Layer 1: Large slow waves
+    // v.x = sin(position.y + ubo.time);
+    // v.y = cos(position.z + ubo.time);
+    // v.z = sin(position.x + ubo.time);
+    
+    // // Layer 2: Smaller, faster detail waves
+    // v.x += 0.5 * sin(position.z * 4.0 - ubo.time);
+    // v.y += 0.5 * cos(position.x * 4.0 - ubo.time);
+    // v.z += 0.5 * sin(position.y * 4.0 - ubo.time);
+    // return v;
+
+
+
+    // Standard Lorenz constants
+    float sigma = 10.0;
+    float rho   = 28.0;
+    float beta  = 8.0 / 3.0;
+
+    // The equations
+    vec3 v = vec3(0.0);
+    position.x = position.x * 2.5;
+    position.y = position.y * 2.5;
+    position.z = (position.z + 10.0) * 2.5;
+
+    float vx = sigma * (position.y - position.x);
+    float vy = position.x * (rho - position.z) - position.y;
+    float vz = position.x * position.y - (beta * position.z);
+
+    return vec3(vx, vy, vz) * 0.1;
+    
+}
+
+
+float random(vec3 seed)
+{
+    return fract(sin(dot(seed, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
+}
+
+void main()
+{
+    uint index = gl_GlobalInvocationID.x;
+
+    if(index >= particlesIn.length())
+        return;
+
+    Particle particleIn = particlesIn[index];
+
+    // RK4 Integration
+    vec3 pos = particleIn.position.xyz;
+    vec3 k1 = GetVelocity(pos);
+    vec3 k2 = GetVelocity(pos + 0.5 * ubo.deltaTime * k1);
+    vec3 k3 = GetVelocity(pos + 0.5 * ubo.deltaTime * k2);
+    vec3 k4 = GetVelocity(pos + ubo.deltaTime * k3);
+
+    vec3 newVel = (1.0 / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);    // use for coloring
+    vec3 newPos = pos + ubo.deltaTime * newVel;
+
+    // Add some random jitter to make it look more natural
+    newPos += 0.01 * (random(pos) - 0.5);
+
+    bool insideBounds = all(greaterThanEqual(newPos, vec3(ubo.minAABB))) && all(lessThanEqual(newPos, vec3(ubo.maxAABB)));
+    if(!insideBounds || particleIn.age >= particleIn.maxAge)
+    {
+        particleIn.age = 0.0;
+        particleIn.maxAge = 5.0 + 5.0 * random(pos + 4.0); // Random lifespan between 5 and 10 seconds
+        particleIn.velocity = vec4(0.0); // Reset velocity
+        particleIn.position.xyz = mix(vec3(ubo.minAABB), vec3(ubo.maxAABB), vec3(random(pos + 1.0), random(pos + 2.0), random(pos + 3.0)));
+    }
+    else
+    {
+        particleIn.age += ubo.deltaTime;
+        particleIn.velocity.xyz = newVel * 10.0;
+        particleIn.position.xyz = newPos;
+    }
+
+    particlesOut[index] = particleIn;
+}
+
+
