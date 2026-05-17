@@ -34,29 +34,6 @@
 
 namespace VkApplication
 {
-    struct Particle
-    {
-        glm::vec4 Position;
-        glm::vec3 Velocity;
-        float     Age;
-        float     MaxAge;
-        glm::vec2 Padding;    // Padding to make the struct size a multiple of
-    };
-
-    struct GraphicsPipelineUniformBufferObject
-    {
-        glm::mat4 ViewMatrix;
-        glm::mat4 ProjMatrix;
-    };
-
-    struct ComputePipelineUniformBufferObject
-    {
-        float Time;
-        float DeltaTime;
-        float MinAABB;
-        float MaxAABB;
-    };
-
     // Variable Declaration
     const std::vector<const char*> vulkanRequiredInstanceLayers = {
 #if VK_ENABLE_VALIDATION_LAYER
@@ -94,10 +71,9 @@ namespace VkApplication
         VkFormat                         depthFormat;
     } physicalDevice;
 
-    VkInstance          vkInstance{ VK_NULL_HANDLE };
-    VkSurfaceKHR        vulkanSurface{ VK_NULL_HANDLE };
-    // VkPhysicalDevice    physicalDevice.handle{ VK_NULL_HANDLE }; // This object will be implicitly destroyedd when 'VkInstance' is destroyed.
-    VkDevice            vulkanLogicalDevice{ VK_NULL_HANDLE };  // Vulkan Logical Device
+    VkInstance    vkInstance{ VK_NULL_HANDLE };
+    VkSurfaceKHR  vulkanSurface{ VK_NULL_HANDLE };
+    VkDevice      vulkanLogicalDevice{ VK_NULL_HANDLE };  // Vulkan Logical Device
 
     VX_FRAMEWORK_NAMESPACE::types::QueueFamilyIndices vulkanSelectedPhysicalDeviceQueueFamily;
 
@@ -113,7 +89,6 @@ namespace VkApplication
         VkExtent2D                  extent;
 
         VkPresentModeKHR            presentMode;
-        std::vector<VkFramebuffer>  framebuffers;
         bool framebufferResized = false;
     } swapChain{};
 
@@ -121,17 +96,19 @@ namespace VkApplication
     VkImageView swapChainDepthView;
 
     struct {
-        std::vector<VkFramebuffer>  framebuffers_MSAA;
+        VkSampleCountFlagBits samplesCount = VK_SAMPLE_COUNT_1_BIT;
+
+        VkRenderPass renderPass;
+        
+        std::vector<VkFramebuffer>  framebuffers;
+        
         VX_FRAMEWORK_NAMESPACE::types::VulkanImage colorTexture;
         VkImageView colorView;
+        
         VX_FRAMEWORK_NAMESPACE::types::VulkanImage depthTexture;
         VkImageView depthView;
 
-        VkRenderPass renderPass_MSAA;
-        bool useMSAA = false;
-        bool requestedMSAA = false;
     } msaa;
-    VkSampleCountFlagBits msaaSamplesCount = VK_SAMPLE_COUNT_1_BIT;
 
     struct {
         uint32_t framebufferWidth;
@@ -141,57 +118,16 @@ namespace VkApplication
         VkDescriptorPool descriptorPool{ VK_NULL_HANDLE };
     } imgui_renderer{};
 
-    VkRenderPass vulkanRenderPass{ VK_NULL_HANDLE };
-
     VkCommandPool vulkanCommandPool{ VK_NULL_HANDLE };
+    VkDescriptorPool vulkanDescriptorPool{ VK_NULL_HANDLE };
+
     VkCommandBuffer vulkanOneTimeCommandBuffer{ VK_NULL_HANDLE };    // Command buffer for one time operations like texture loading, buffer copy etc. This command buffer will be automatically freed when its command pool is destroyed, so we don't need explicit clenup.
     VkCommandBuffer vulkanCommandBuffers[MAX_FRAMES_IN_FLIGHT]{ VK_NULL_HANDLE };    // Command buffers will be automatically freed when their command pool is destroyed, so we don't need explicit clenup.
-
-
-    VkDescriptorPool vulkanDescriptorPool{ VK_NULL_HANDLE };
 
         // Synchromization Objects
     VkSemaphore imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT]{ VK_NULL_HANDLE };    // To signal that an image has been aquired from the swapchain and is ready for rendering.
     VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT]{ VK_NULL_HANDLE };    // To signal that rendering has finished and presentation can happen.
     VkFence inFlightFences[MAX_FRAMES_IN_FLIGHT]{ VK_NULL_HANDLE };                  // To make sure only one frame is rendering at a time.
-
-        // Particles Data
-    const uint32_t MAX_PARTICLES = 1000000;
-    const float MIN_AABB = -10.0f;
-    const float MAX_AABB = 10.0f;
-
-        // Shader Storage Buffer Object
-    VX_FRAMEWORK_NAMESPACE::types::VulkanBuffer particleSSBOs[2];   // Ping Pong SSBOs for Compute Pipeline.
-
-        // Graphics Pipeline
-    struct GraphicsPipeline
-    {
-        VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
-        VkPipeline pipeline_MSAA{ VK_NULL_HANDLE };
-        VkPipeline pipeline{ VK_NULL_HANDLE };
-        VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
-        VkDescriptorSet descriptorSets[2]{ VK_NULL_HANDLE };    // Ping Pong Descriptor Sets for Graphics Pipeline.
-        VX_FRAMEWORK_NAMESPACE::types::VulkanUniformBuffer uniformBuffer{};
-    } graphicsPipeline;
-
-    struct ComputePipeline
-    {
-        VkPipelineLayout pipelineLayout{ VK_NULL_HANDLE };
-        VkPipeline pipeline{ VK_NULL_HANDLE };
-        VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
-        VkDescriptorSet descriptorSets[2]{ VK_NULL_HANDLE };    // Ping Pong Descriptor Sets for Compute Pipeline.
-        VX_FRAMEWORK_NAMESPACE::types::VulkanUniformBuffer uniformBuffer{};
-    } computePipeline;
-
-    // Sync Counter For Compute Pipeline
-    VkSemaphore computePipelineFinishedSemaphore[MAX_FRAMES_IN_FLIGHT]{ VK_NULL_HANDLE };
-
-    int computePingPongIndex = 0;
-    int graphicsPingPongIndex = 0;
-    uint32_t frameNumber = 0;
-
-    bool reInitImGui = false;    // A flag to indicate whether we need to re-initialize Imgui. We need this when swapchain is recreated because Imgui's render resources are dependent on swapchain's render pass and framebuffers.
-    float cameraDistance = 20.0f;
 
 // ====================================================== Function Definition Begin ====================================================== //
 
@@ -250,13 +186,13 @@ namespace VkApplication
         // get sample counts which are supported by both color and depth buffer.
         VkSampleCountFlags sampleCounts = physicalDeviceProperties.limits.framebufferColorSampleCounts & physicalDeviceProperties.limits.framebufferDepthSampleCounts;
             
-             if(sampleCounts & VK_SAMPLE_COUNT_64_BIT)      msaaSamplesCount = VK_SAMPLE_COUNT_64_BIT;
-        else if(sampleCounts & VK_SAMPLE_COUNT_32_BIT)      msaaSamplesCount = VK_SAMPLE_COUNT_32_BIT;
-        else if(sampleCounts & VK_SAMPLE_COUNT_16_BIT)      msaaSamplesCount = VK_SAMPLE_COUNT_16_BIT;
-        else if(sampleCounts & VK_SAMPLE_COUNT_8_BIT)       msaaSamplesCount = VK_SAMPLE_COUNT_8_BIT;
-        else if(sampleCounts & VK_SAMPLE_COUNT_4_BIT)       msaaSamplesCount = VK_SAMPLE_COUNT_4_BIT;
-        else if(sampleCounts & VK_SAMPLE_COUNT_2_BIT)       msaaSamplesCount = VK_SAMPLE_COUNT_2_BIT;
-        else msaaSamplesCount = VK_SAMPLE_COUNT_1_BIT;
+             if(sampleCounts & VK_SAMPLE_COUNT_64_BIT)      msaa.samplesCount = VK_SAMPLE_COUNT_64_BIT;
+        else if(sampleCounts & VK_SAMPLE_COUNT_32_BIT)      msaa.samplesCount = VK_SAMPLE_COUNT_32_BIT;
+        else if(sampleCounts & VK_SAMPLE_COUNT_16_BIT)      msaa.samplesCount = VK_SAMPLE_COUNT_16_BIT;
+        else if(sampleCounts & VK_SAMPLE_COUNT_8_BIT)       msaa.samplesCount = VK_SAMPLE_COUNT_8_BIT;
+        else if(sampleCounts & VK_SAMPLE_COUNT_4_BIT)       msaa.samplesCount = VK_SAMPLE_COUNT_4_BIT;
+        else if(sampleCounts & VK_SAMPLE_COUNT_2_BIT)       msaa.samplesCount = VK_SAMPLE_COUNT_2_BIT;
+        else msaa.samplesCount = VK_SAMPLE_COUNT_1_BIT;
 
         // Setup Logical Device
         VkPhysicalDeviceFeatures deviceFeatures{};
@@ -272,41 +208,6 @@ namespace VkApplication
         return true;
 
 #undef CHECK_FUNCTION_RETURN
-    }
-
-    /**
-     * @brief ChooseSwapSurfaceFormat()
-     */
-    static VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
-    {
-        // code
-        for(const VkSurfaceFormatKHR& surfaceFormat : availableFormats)
-        {
-            if((surfaceFormat.format == VK_FORMAT_B8G8R8A8_SRGB) &&
-               (surfaceFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR))
-            {
-                return surfaceFormat;
-            }
-        }
-
-        // If above format not found then just return 1st member from array.
-        return availableFormats[0];
-    }
-
-    /**
-     * @brief ChooseSwapPresentMode()
-     */
-    static VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes)
-    {
-        // code
-        for(const VkPresentModeKHR& presentMode : availablePresentModes)
-        {
-            if(presentMode == VK_PRESENT_MODE_MAILBOX_KHR)  // A.K.A. Triple Buffering ( Used when energy usage is not concern.)
-            {
-                return presentMode;
-            }
-        }
-        return VK_PRESENT_MODE_FIFO_KHR;    // For Devices Where energy usage is more important.
     }
 
     /**
@@ -349,9 +250,37 @@ namespace VkApplication
         // code
         VX_FRAMEWORK_NAMESPACE::types::SwapChainSupportDetails swapChainSupport = VX_FRAMEWORK_NAMESPACE::utils::GetSwapChainSupportDetails(physicalDevice.handle, vulkanSurface);
 
-        VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.formats);
-        VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.presentModes);
+        // Choose Swap chain format
+        VkSurfaceFormatKHR surfaceFormat = swapChainSupport.formats[0];
+        for(const VkSurfaceFormatKHR& format : swapChainSupport.formats) {
+            if((format.format == VK_FORMAT_B8G8R8A8_SRGB) && (format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)) { surfaceFormat = format; break; }
+        }
+
+        // Choose Swap chain present mode
+        VkPresentModeKHR presentMode = swapChainSupport.presentModes[0];
+        for(const VkPresentModeKHR& mode : swapChainSupport.presentModes) {
+            if(presentMode == VK_PRESENT_MODE_MAILBOX_KHR)  { // A.K.A. Triple Buffering ( Used when energy usage is not concern.)
+                presentMode = mode;
+                break;
+            }
+        }
+
+        // Choose Swap chain extent
         VkExtent2D extent = ChooseSwapExtent(swapChainSupport.capabilities);
+        if(swapChainSupport.capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+            extent = swapChainSupport.capabilities.currentExtent;
+        }
+        else {
+            RECT rect;
+            GetClientRect(ghwnd, &rect);
+
+            VkExtent2D actualExtent = { static_cast<uint32_t>(rect.right), static_cast<uint32_t>(rect.bottom) };
+
+            actualExtent.width  = CLAMP(  actualExtent.width,  swapChainSupport.capabilities.minImageExtent.width,  swapChainSupport.capabilities.maxImageExtent.width);
+            actualExtent.height = CLAMP( actualExtent.height, swapChainSupport.capabilities.minImageExtent.height, swapChainSupport.capabilities.maxImageExtent.height);
+
+            extent = actualExtent;
+        }
 
         LogDebug("Vulkan Swap Chain Details:");
         LogDebug("\tSurface Format: %s, Color Space: %s", VX_FRAMEWORK_NAMESPACE::helper::GetVkFormatString(surfaceFormat.format), VX_FRAMEWORK_NAMESPACE::helper::GetVkColorSpaceString(surfaceFormat.colorSpace));
@@ -512,105 +441,105 @@ namespace VkApplication
         return true;
     }
 
-    /**
-     * @brief CreateVulkanFramebuffersForSwapchain()
-    */
-    static bool CreateVulkanFramebuffersForSwapchain()
-    {
-        // code
-        swapChain.framebuffers.resize( swapChain.imageViews.size());
-        for(size_t i = 0; i < swapChain.imageViews.size(); ++i)
-        {
-            VkImageView attachments[] = {
-                swapChain.imageViews[i],
-                swapChainDepthView
-            };
+//     /**
+//      * @brief CreateVulkanFramebuffersForSwapchain()
+//     */
+//     static bool CreateVulkanFramebuffersForSwapchain()
+//     {
+//         // code
+//         swapChain.framebuffers.resize( swapChain.imageViews.size());
+//         for(size_t i = 0; i < swapChain.imageViews.size(); ++i)
+//         {
+//             VkImageView attachments[] = {
+//                 swapChain.imageViews[i],
+//                 swapChainDepthView
+//             };
 
-            if(!VX_FRAMEWORK_NAMESPACE::utils::CreateVkFramebuffer(vulkanLogicalDevice, vulkanRenderPass, _ARRAYSIZE(attachments), attachments, swapChain.extent.width, swapChain.extent.height, 1, &swapChain.framebuffers[i]))
-            {
-                LogError("Vulkan: [Error] VX_FRAMEWORK_NAMESPACE::utils::CreateVkFramebuffer() Failed. ");
-                return false;
-            }
-        }
+//             if(!VX_FRAMEWORK_NAMESPACE::utils::CreateVkFramebuffer(vulkanLogicalDevice, vulkanRenderPass, _ARRAYSIZE(attachments), attachments, swapChain.extent.width, swapChain.extent.height, 1, &swapChain.framebuffers[i]))
+//             {
+//                 LogError("Vulkan: [Error] VX_FRAMEWORK_NAMESPACE::utils::CreateVkFramebuffer() Failed. ");
+//                 return false;
+//             }
+//         }
 
-        LogSuccess("Vulkan: [Success] Vulkan Swapchain Frambuffers Created.");
-        return true;
-    }
+//         LogSuccess("Vulkan: [Success] Vulkan Swapchain Frambuffers Created.");
+//         return true;
+//     }
 
-    /**
-     * @brief CreateVulkanRenderPass()
-     * @return 
-     */
-    static bool CreateVulkanRenderPass()
-    {
-        // code
-////////////// Attachment Description.
-        VkAttachmentDescription colorAttachmentDescrition{};
-        colorAttachmentDescrition.format         = swapChain.imageFormat;
-        colorAttachmentDescrition.samples        = VK_SAMPLE_COUNT_1_BIT;
-        colorAttachmentDescrition.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        colorAttachmentDescrition.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAttachmentDescrition.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        colorAttachmentDescrition.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        colorAttachmentDescrition.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;        // Specifies which layout the image will have before the render pass begins.
-        colorAttachmentDescrition.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;    // Specifies the layout to automatically transition to when the render pass finishes.
+//     /**
+//      * @brief CreateVulkanRenderPass()
+//      * @return 
+//      */
+//     static bool CreateVulkanRenderPass()
+//     {
+//         // code
+// ////////////// Attachment Description.
+//         VkAttachmentDescription colorAttachmentDescrition{};
+//         colorAttachmentDescrition.format         = swapChain.imageFormat;
+//         colorAttachmentDescrition.samples        = VK_SAMPLE_COUNT_1_BIT;
+//         colorAttachmentDescrition.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+//         colorAttachmentDescrition.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+//         colorAttachmentDescrition.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+//         colorAttachmentDescrition.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+//         colorAttachmentDescrition.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;        // Specifies which layout the image will have before the render pass begins.
+//         colorAttachmentDescrition.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;    // Specifies the layout to automatically transition to when the render pass finishes.
 
-        VkAttachmentDescription depthAttachmentDescription{};
-        depthAttachmentDescription.format         = physicalDevice.depthFormat;
-        depthAttachmentDescription.samples        = VK_SAMPLE_COUNT_1_BIT;
-        depthAttachmentDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        depthAttachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depthAttachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        depthAttachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depthAttachmentDescription.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;        // Specifies which layout the image will have before the render pass begins.
-        depthAttachmentDescription.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+//         VkAttachmentDescription depthAttachmentDescription{};
+//         depthAttachmentDescription.format         = physicalDevice.depthFormat;
+//         depthAttachmentDescription.samples        = VK_SAMPLE_COUNT_1_BIT;
+//         depthAttachmentDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+//         depthAttachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+//         depthAttachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+//         depthAttachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+//         depthAttachmentDescription.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;        // Specifies which layout the image will have before the render pass begins.
+//         depthAttachmentDescription.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-////////////// Subpasses and attachment references.
-            // A single render pass can consist of multiple subpasses. Subpasses are subsequent rendering operations that depend on the
-            // contents of framebuffers in previous passes, for example a sequence of post-processing effects that are applied one after another.
-        VkAttachmentReference colorAttachmentReference{};
-        colorAttachmentReference.attachment = 0;        // Specifies which attachment to reference by its index in the attachment descriptions array.
-        colorAttachmentReference.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // Specifies which layout we would like the attachment to have during a subpass that uses this reference.
+// ////////////// Subpasses and attachment references.
+//             // A single render pass can consist of multiple subpasses. Subpasses are subsequent rendering operations that depend on the
+//             // contents of framebuffers in previous passes, for example a sequence of post-processing effects that are applied one after another.
+//         VkAttachmentReference colorAttachmentReference{};
+//         colorAttachmentReference.attachment = 0;        // Specifies which attachment to reference by its index in the attachment descriptions array.
+//         colorAttachmentReference.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // Specifies which layout we would like the attachment to have during a subpass that uses this reference.
 
-        VkAttachmentReference depthAttachmentReference{};
-        depthAttachmentReference.attachment = 1;        // Specifies which attachment to reference by its index in the attachment descriptions array.
-        depthAttachmentReference.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL; // Specifies
+//         VkAttachmentReference depthAttachmentReference{};
+//         depthAttachmentReference.attachment = 1;        // Specifies which attachment to reference by its index in the attachment descriptions array.
+//         depthAttachmentReference.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL; // Specifies
 
-        VkSubpassDescription subpassDescription{};
-        subpassDescription.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpassDescription.colorAttachmentCount = 1;
-        subpassDescription.pColorAttachments    = &colorAttachmentReference;
-        subpassDescription.pDepthStencilAttachment = &depthAttachmentReference;
+//         VkSubpassDescription subpassDescription{};
+//         subpassDescription.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+//         subpassDescription.colorAttachmentCount = 1;
+//         subpassDescription.pColorAttachments    = &colorAttachmentReference;
+//         subpassDescription.pDepthStencilAttachment = &depthAttachmentReference;
 
-#if 1
-        VkSubpassDependency subpassDependency{};
-        subpassDependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
-        subpassDependency.dstSubpass    = 0;
-        subpassDependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-        subpassDependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        subpassDependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        subpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-#endif
+// #if 1
+//         VkSubpassDependency subpassDependency{};
+//         subpassDependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
+//         subpassDependency.dstSubpass    = 0;
+//         subpassDependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+//         subpassDependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+//         subpassDependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+//         subpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+// #endif
 
-////////////// Render Pass
-        VkAttachmentDescription attachments[] = { colorAttachmentDescrition, depthAttachmentDescription };
+// ////////////// Render Pass
+//         VkAttachmentDescription attachments[] = { colorAttachmentDescrition, depthAttachmentDescription };
 
-        VkRenderPassCreateInfo renderPassCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::renderPassCreateInfo();
-        renderPassCreateInfo.attachmentCount = _ARRAYSIZE(attachments);
-        renderPassCreateInfo.pAttachments = attachments;
-        renderPassCreateInfo.subpassCount = 1;
-        renderPassCreateInfo.pSubpasses = &subpassDescription;
+//         VkRenderPassCreateInfo renderPassCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::renderPassCreateInfo();
+//         renderPassCreateInfo.attachmentCount = _ARRAYSIZE(attachments);
+//         renderPassCreateInfo.pAttachments = attachments;
+//         renderPassCreateInfo.subpassCount = 1;
+//         renderPassCreateInfo.pSubpasses = &subpassDescription;
 
-#if 1
-        renderPassCreateInfo.dependencyCount = 1;
-        renderPassCreateInfo.pDependencies = &subpassDependency;
-#endif
+// #if 1
+//         renderPassCreateInfo.dependencyCount = 1;
+//         renderPassCreateInfo.pDependencies = &subpassDependency;
+// #endif
 
-        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateRenderPass( vulkanLogicalDevice, &renderPassCreateInfo, nullptr, &vulkanRenderPass), false);
-        LogSuccess("Vulkan: [Success] Vulkan Graphics Render Pass Created.");
+//         VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateRenderPass( vulkanLogicalDevice, &renderPassCreateInfo, nullptr, &vulkanRenderPass), false);
+//         LogSuccess("Vulkan: [Success] Vulkan Graphics Render Pass Created.");
 
-        return true;
-    }
+//         return true;
+//     }
 
 
     static bool InitializeMSAAResources(bool reInit = true)
@@ -618,15 +547,15 @@ namespace VkApplication
         // code
         msaa.colorTexture.Destroy(vulkanLogicalDevice);
         msaa.depthTexture.Destroy(vulkanLogicalDevice);
-        for(VkFramebuffer& framebuffer : msaa.framebuffers_MSAA)
+        for(VkFramebuffer& framebuffer : msaa.framebuffers)
         {
             vkDestroyFramebuffer(vulkanLogicalDevice, framebuffer, nullptr);
             framebuffer = VK_NULL_HANDLE;
         }
-        if(msaa.renderPass_MSAA != VK_NULL_HANDLE)
+        if(msaa.renderPass != VK_NULL_HANDLE)
         {
-            vkDestroyRenderPass(vulkanLogicalDevice, msaa.renderPass_MSAA, nullptr);
-            msaa.renderPass_MSAA = VK_NULL_HANDLE;
+            vkDestroyRenderPass(vulkanLogicalDevice, msaa.renderPass, nullptr);
+            msaa.renderPass = VK_NULL_HANDLE;
         }
         if(msaa.colorView != VK_NULL_HANDLE)
         {
@@ -655,7 +584,7 @@ namespace VkApplication
                 surfaceCaps.currentExtent.width, surfaceCaps.currentExtent.height, 1U,
                 swapChain.imageFormat,
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                msaaSamplesCount,
+                msaa.samplesCount,
                 false,
                 &msaa.colorTexture.imageInfo, &msaa.colorTexture.handle, &msaa.colorTexture.memory
             ))
@@ -680,7 +609,7 @@ namespace VkApplication
                 surfaceCaps.currentExtent.width, surfaceCaps.currentExtent.height, 1U,
                 physicalDevice.depthFormat,
                 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                msaaSamplesCount,
+                msaa.samplesCount,
                 false,
                 &msaa.depthTexture.imageInfo, &msaa.depthTexture.handle, &msaa.depthTexture.memory
             ))
@@ -732,7 +661,7 @@ namespace VkApplication
             ////////////// Attachment Description.
             VkAttachmentDescription colorAttachmentDescription{};
             colorAttachmentDescription.format         = swapChain.imageFormat;
-            colorAttachmentDescription.samples        = msaaSamplesCount;
+            colorAttachmentDescription.samples        = msaa.samplesCount;
             colorAttachmentDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
             colorAttachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
             colorAttachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -742,7 +671,7 @@ namespace VkApplication
 
             VkAttachmentDescription depthAttachmentDescription{};
             depthAttachmentDescription.format         = physicalDevice.depthFormat;
-            depthAttachmentDescription.samples        = msaaSamplesCount;
+            depthAttachmentDescription.samples        = msaa.samplesCount;
             depthAttachmentDescription.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
             depthAttachmentDescription.storeOp        = VK_ATTACHMENT_STORE_OP_DONT_CARE;
             depthAttachmentDescription.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -804,19 +733,19 @@ namespace VkApplication
             renderPassCreateInfo.pDependencies = &subpassDependency;
     #endif
 
-            VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateRenderPass( vulkanLogicalDevice, &renderPassCreateInfo, nullptr, &msaa.renderPass_MSAA), false);
+            VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateRenderPass( vulkanLogicalDevice, &renderPassCreateInfo, nullptr, &msaa.renderPass), false);
             LogSuccess("Vulkan: [Success] Vulkan Graphics Render Pass Created.");
         }
 
         // Framebuffers
         {
-            msaa.framebuffers_MSAA.resize( swapChain.imageViews.size());
-            for(size_t i = 0; i < msaa.framebuffers_MSAA.size(); ++i)
+            msaa.framebuffers.resize( swapChain.imageViews.size());
+            for(size_t i = 0; i < msaa.framebuffers.size(); ++i)
             {
                 VkImageView attachments[] = { msaa.colorView, msaa.depthView, swapChain.imageViews[i]
                 };
 
-                if(!VX_FRAMEWORK_NAMESPACE::utils::CreateVkFramebuffer(vulkanLogicalDevice, msaa.renderPass_MSAA, _ARRAYSIZE(attachments), attachments, swapChain.extent.width, swapChain.extent.height, 1, &msaa.framebuffers_MSAA[i]))
+                if(!VX_FRAMEWORK_NAMESPACE::utils::CreateVkFramebuffer(vulkanLogicalDevice, msaa.renderPass, _ARRAYSIZE(attachments), attachments, swapChain.extent.width, swapChain.extent.height, 1, &msaa.framebuffers[i]))
                 {
                     LogError("Vulkan: [Error] VX_FRAMEWORK_NAMESPACE::utils::CreateVkFramebuffer() Failed. ");
                     return false;
@@ -915,9 +844,9 @@ namespace VkApplication
 
         initInfo.UseDynamicRendering = VK_FALSE;   // We are using Render Passes, so this should be false.
         
-        initInfo.PipelineInfoMain.RenderPass    = msaa.useMSAA ? msaa.renderPass_MSAA : vulkanRenderPass;
+        initInfo.PipelineInfoMain.RenderPass    = msaa.renderPass;
         initInfo.PipelineInfoMain.Subpass       = 0;
-        initInfo.PipelineInfoMain.MSAASamples   =  msaa.useMSAA ? msaaSamplesCount : VK_SAMPLE_COUNT_1_BIT;
+        initInfo.PipelineInfoMain.MSAASamples   =  msaa.samplesCount;
 
         initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
         initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.pNext = nullptr;
@@ -1100,315 +1029,315 @@ namespace VkApplication
     }
 
 
-    // ============== Graphics Pipeline Initialization : Begin ==============
-    /**
-     * @brief CreateGraphicsPipelineResources()
-    */
-    static bool CreateGraphicsPipelineResources()
-    {
-        // code
-        // Create Uniform Buffers
-        if(!CreateUniformBuffer(sizeof(GraphicsPipelineUniformBufferObject), &graphicsPipeline.uniformBuffer, 1U))
-        {
-            LogError("Failed to create uniform buffers for graphics pipeline.");
-            return false;
-        }
+//     // ============== Graphics Pipeline Initialization : Begin ==============
+//     /**
+//      * @brief CreateGraphicsPipelineResources()
+//     */
+//     static bool CreateGraphicsPipelineResources()
+//     {
+//         // code
+//         // Create Uniform Buffers
+//         if(!CreateUniformBuffer(sizeof(GraphicsPipelineUniformBufferObject), &graphicsPipeline.uniformBuffer, 1U))
+//         {
+//             LogError("Failed to create uniform buffers for graphics pipeline.");
+//             return false;
+//         }
 
-        // Descriptor Set Layouts
-        VkDescriptorSetLayoutBinding descLayoutBindings[] = {
-            VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutBinding(0U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 1U),
-            VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutBinding(1U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 1U)
-        };
-        VkDescriptorSetLayoutCreateInfo descSetLayoutCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutCreateInfo( static_cast<uint32_t>(std::size(descLayoutBindings)), descLayoutBindings);
-        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateDescriptorSetLayout( vulkanLogicalDevice, &descSetLayoutCreateInfo, nullptr, &graphicsPipeline.descriptorSetLayout), false);
+//         // Descriptor Set Layouts
+//         VkDescriptorSetLayoutBinding descLayoutBindings[] = {
+//             VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutBinding(0U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 1U),
+//             VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutBinding(1U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 1U)
+//         };
+//         VkDescriptorSetLayoutCreateInfo descSetLayoutCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutCreateInfo( static_cast<uint32_t>(std::size(descLayoutBindings)), descLayoutBindings);
+//         VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateDescriptorSetLayout( vulkanLogicalDevice, &descSetLayoutCreateInfo, nullptr, &graphicsPipeline.descriptorSetLayout), false);
 
-        // Create Descriptor Sets
-        VkDescriptorSetLayout layouts[2];
-        for( int i = 0; i < 2; ++i)
-        {
-            layouts[i] = graphicsPipeline.descriptorSetLayout;
-        }
+//         // Create Descriptor Sets
+//         VkDescriptorSetLayout layouts[2];
+//         for( int i = 0; i < 2; ++i)
+//         {
+//             layouts[i] = graphicsPipeline.descriptorSetLayout;
+//         }
 
-        VkDescriptorSetAllocateInfo allocInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetAllocateInfo(vulkanDescriptorPool, 2U, layouts);
-        VK_UTIL_FN_ERROR_CHECK_RETURN( vkAllocateDescriptorSets(vulkanLogicalDevice, &allocInfo, graphicsPipeline.descriptorSets), false);
+//         VkDescriptorSetAllocateInfo allocInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetAllocateInfo(vulkanDescriptorPool, 2U, layouts);
+//         VK_UTIL_FN_ERROR_CHECK_RETURN( vkAllocateDescriptorSets(vulkanLogicalDevice, &allocInfo, graphicsPipeline.descriptorSets), false);
 
-        for( size_t i = 0; i < 2; ++i)
-        {
-            VkDescriptorBufferInfo storageBufferInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorBufferInfo(particleSSBOs[i].handle, 0, VK_WHOLE_SIZE);
-            VkDescriptorBufferInfo uniformBufferInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorBufferInfo(graphicsPipeline.uniformBuffer.handle, 0, sizeof(GraphicsPipelineUniformBufferObject));
+//         for( size_t i = 0; i < 2; ++i)
+//         {
+//             VkDescriptorBufferInfo storageBufferInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorBufferInfo(particleSSBOs[i].handle, 0, VK_WHOLE_SIZE);
+//             VkDescriptorBufferInfo uniformBufferInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorBufferInfo(graphicsPipeline.uniformBuffer.handle, 0, sizeof(GraphicsPipelineUniformBufferObject));
 
-            VkWriteDescriptorSet descriptorWrites[] = {
-                VX_FRAMEWORK_NAMESPACE::initializers::writeBufferDescriptorSet(graphicsPipeline.descriptorSets[i], 0U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &storageBufferInfo, 1U),
-                VX_FRAMEWORK_NAMESPACE::initializers::writeBufferDescriptorSet(graphicsPipeline.descriptorSets[i], 1U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &uniformBufferInfo, 1U)
-            };
+//             VkWriteDescriptorSet descriptorWrites[] = {
+//                 VX_FRAMEWORK_NAMESPACE::initializers::writeBufferDescriptorSet(graphicsPipeline.descriptorSets[i], 0U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &storageBufferInfo, 1U),
+//                 VX_FRAMEWORK_NAMESPACE::initializers::writeBufferDescriptorSet(graphicsPipeline.descriptorSets[i], 1U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &uniformBufferInfo, 1U)
+//             };
 
-            vkUpdateDescriptorSets(vulkanLogicalDevice, static_cast<uint32_t>(std::size(descriptorWrites)), descriptorWrites, 0, nullptr);
-        }
+//             vkUpdateDescriptorSets(vulkanLogicalDevice, static_cast<uint32_t>(std::size(descriptorWrites)), descriptorWrites, 0, nullptr);
+//         }
 
-////////////// Creating shader modules.
-        VkShaderModule vertexShaderModule = VX_FRAMEWORK_NAMESPACE::utils::CreateVkShaderModuleFromFile(vulkanLogicalDevice, "shaders/render.vert.spv");
-        VkShaderModule fragmentShaderModule = VX_FRAMEWORK_NAMESPACE::utils::CreateVkShaderModuleFromFile(vulkanLogicalDevice, "shaders/render.frag.spv");
+// ////////////// Creating shader modules.
+//         VkShaderModule vertexShaderModule = VX_FRAMEWORK_NAMESPACE::utils::CreateVkShaderModuleFromFile(vulkanLogicalDevice, "shaders/render.vert.spv");
+//         VkShaderModule fragmentShaderModule = VX_FRAMEWORK_NAMESPACE::utils::CreateVkShaderModuleFromFile(vulkanLogicalDevice, "shaders/render.frag.spv");
 
-        if(!vertexShaderModule || !fragmentShaderModule)
-        {
-            if(fragmentShaderModule)
-            {
-                vkDestroyShaderModule( vulkanLogicalDevice, fragmentShaderModule, nullptr);
-                fragmentShaderModule = nullptr;
-            }
+//         if(!vertexShaderModule || !fragmentShaderModule)
+//         {
+//             if(fragmentShaderModule)
+//             {
+//                 vkDestroyShaderModule( vulkanLogicalDevice, fragmentShaderModule, nullptr);
+//                 fragmentShaderModule = nullptr;
+//             }
             
-            if(vertexShaderModule)
-            {
-                vkDestroyShaderModule( vulkanLogicalDevice, vertexShaderModule, nullptr);
-                vertexShaderModule = nullptr;
-            }
+//             if(vertexShaderModule)
+//             {
+//                 vkDestroyShaderModule( vulkanLogicalDevice, vertexShaderModule, nullptr);
+//                 vertexShaderModule = nullptr;
+//             }
 
-            return false;
-        }
+//             return false;
+//         }
 
-////////////// Shader Stage Creation. (Programmable Stage)
-        VkPipelineShaderStageCreateInfo vertexShaderStageInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertexShaderModule, "main");
-        VkPipelineShaderStageCreateInfo fragmentShaderStageInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentShaderModule, "main");
+// ////////////// Shader Stage Creation. (Programmable Stage)
+//         VkPipelineShaderStageCreateInfo vertexShaderStageInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertexShaderModule, "main");
+//         VkPipelineShaderStageCreateInfo fragmentShaderStageInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentShaderModule, "main");
 
-        VkPipelineShaderStageCreateInfo shaderStages[] = { vertexShaderStageInfo, fragmentShaderStageInfo };
+//         VkPipelineShaderStageCreateInfo shaderStages[] = { vertexShaderStageInfo, fragmentShaderStageInfo };
 
-////////////// Vertex Input
-        VkPipelineVertexInputStateCreateInfo vertexInputCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineVertexInputStateCreateInfo(0, nullptr, 0, nullptr);
+// ////////////// Vertex Input
+//         VkPipelineVertexInputStateCreateInfo vertexInputCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineVertexInputStateCreateInfo(0, nullptr, 0, nullptr);
 
-////////////// Input Assembly
-        VkPipelineInputAssemblyStateCreateInfo inputAssemblyCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_POINT_LIST, 0U, VK_FALSE);
+// ////////////// Input Assembly
+//         VkPipelineInputAssemblyStateCreateInfo inputAssemblyCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_POINT_LIST, 0U, VK_FALSE);
 
-////////////// Dynamic State
-        VkDynamicState dynamicStates[] = {
-            VK_DYNAMIC_STATE_VIEWPORT,
-            VK_DYNAMIC_STATE_SCISSOR
-        };
+// ////////////// Dynamic State
+//         VkDynamicState dynamicStates[] = {
+//             VK_DYNAMIC_STATE_VIEWPORT,
+//             VK_DYNAMIC_STATE_SCISSOR
+//         };
         
-        VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineDynamicStateCreateInfo(static_cast<uint32_t>(std::size(dynamicStates)), dynamicStates);
+//         VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineDynamicStateCreateInfo(static_cast<uint32_t>(std::size(dynamicStates)), dynamicStates);
 
-////////////// Viewports and scissors
-        // VkViewport viewport{};
-        // viewport.x = 0.0f;
-        // viewport.y = 0.0f;
-        // viewport.width = (float)swapChain.extent.width;
-        // viewport.height = (float)swapChain.extent.height;
-        // viewport.minDepth = 0.0f;
-        // viewport.maxDepth = 1.0f;
+// ////////////// Viewports and scissors
+//         // VkViewport viewport{};
+//         // viewport.x = 0.0f;
+//         // viewport.y = 0.0f;
+//         // viewport.width = (float)swapChain.extent.width;
+//         // viewport.height = (float)swapChain.extent.height;
+//         // viewport.minDepth = 0.0f;
+//         // viewport.maxDepth = 1.0f;
 
-        // VkRect2D scissor{};
-        // scissor.offset = { 0, 0};
-        // scissor.extent = swapChain.extent;
-        VkPipelineViewportStateCreateInfo viewportStateCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineViewportStateCreateInfo(1U, nullptr, 1U, nullptr);
+//         // VkRect2D scissor{};
+//         // scissor.offset = { 0, 0};
+//         // scissor.extent = swapChain.extent;
+//         VkPipelineViewportStateCreateInfo viewportStateCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineViewportStateCreateInfo(1U, nullptr, 1U, nullptr);
 
 
-////////////// Rasterizer
-        VkPipelineRasterizationStateCreateInfo rasterizerStateCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-        rasterizerStateCreateInfo.lineWidth                 = 1.0f;
-        rasterizerStateCreateInfo.depthClampEnable          = VK_FALSE;
-        rasterizerStateCreateInfo.rasterizerDiscardEnable   = VK_FALSE;     // if it true then geometry never passes through the rasterizer stage. (Disable any output to the framebuffer).
-        rasterizerStateCreateInfo.depthBiasEnable           = VK_FALSE;
-        rasterizerStateCreateInfo.depthBiasConstantFactor   = 0.0f;         // Optional
-        rasterizerStateCreateInfo.depthBiasClamp            = 0.0f;         // Optional
-        rasterizerStateCreateInfo.depthBiasSlopeFactor      = 0.0f;         // Optional
+// ////////////// Rasterizer
+//         VkPipelineRasterizationStateCreateInfo rasterizerStateCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+//         rasterizerStateCreateInfo.lineWidth                 = 1.0f;
+//         rasterizerStateCreateInfo.depthClampEnable          = VK_FALSE;
+//         rasterizerStateCreateInfo.rasterizerDiscardEnable   = VK_FALSE;     // if it true then geometry never passes through the rasterizer stage. (Disable any output to the framebuffer).
+//         rasterizerStateCreateInfo.depthBiasEnable           = VK_FALSE;
+//         rasterizerStateCreateInfo.depthBiasConstantFactor   = 0.0f;         // Optional
+//         rasterizerStateCreateInfo.depthBiasClamp            = 0.0f;         // Optional
+//         rasterizerStateCreateInfo.depthBiasSlopeFactor      = 0.0f;         // Optional
 
-///////////// Depth Stencil State
-        VkPipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS);
-        depthStencilStateCreateInfo.minDepthBounds = 0.0f; // Optional
-        depthStencilStateCreateInfo.maxDepthBounds = 1.0f; // Optional
+// ///////////// Depth Stencil State
+//         VkPipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS);
+//         depthStencilStateCreateInfo.minDepthBounds = 0.0f; // Optional
+//         depthStencilStateCreateInfo.maxDepthBounds = 1.0f; // Optional
         
-////////////// Multisampling
-#if 1
-        // Enabling it requires enabling a GPU feature.
-        VkPipelineMultisampleStateCreateInfo multisampleCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
-        multisampleCreateInfo.sampleShadingEnable = VK_FALSE;
-        multisampleCreateInfo.minSampleShading = 1.0f;          // Optional
-        multisampleCreateInfo.pSampleMask = nullptr;            // Optional
-        multisampleCreateInfo.alphaToCoverageEnable = VK_FALSE; // Optional
-        multisampleCreateInfo.alphaToOneEnable = VK_FALSE;      // Optional
+// ////////////// Multisampling
+// #if 1
+//         // Enabling it requires enabling a GPU feature.
+//         VkPipelineMultisampleStateCreateInfo multisampleCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
+//         multisampleCreateInfo.sampleShadingEnable = VK_FALSE;
+//         multisampleCreateInfo.minSampleShading = 1.0f;          // Optional
+//         multisampleCreateInfo.pSampleMask = nullptr;            // Optional
+//         multisampleCreateInfo.alphaToCoverageEnable = VK_FALSE; // Optional
+//         multisampleCreateInfo.alphaToOneEnable = VK_FALSE;      // Optional
 
-         // Enabling it requires enabling a GPU feature.
-        VkPipelineMultisampleStateCreateInfo multisampleCreateInfo_MSAAEnabled = VX_FRAMEWORK_NAMESPACE::initializers::pipelineMultisampleStateCreateInfo(msaaSamplesCount);
-        multisampleCreateInfo_MSAAEnabled.sampleShadingEnable = VK_TRUE;
-        multisampleCreateInfo_MSAAEnabled.minSampleShading = 0.2f;
-        multisampleCreateInfo_MSAAEnabled.pSampleMask = nullptr;
-        multisampleCreateInfo_MSAAEnabled.alphaToCoverageEnable = VK_FALSE;
-        multisampleCreateInfo_MSAAEnabled.alphaToOneEnable = VK_FALSE;
-#endif
+//          // Enabling it requires enabling a GPU feature.
+//         VkPipelineMultisampleStateCreateInfo multisampleCreateInfo_MSAAEnabled = VX_FRAMEWORK_NAMESPACE::initializers::pipelineMultisampleStateCreateInfo(msaaSamplesCount);
+//         multisampleCreateInfo_MSAAEnabled.sampleShadingEnable = VK_TRUE;
+//         multisampleCreateInfo_MSAAEnabled.minSampleShading = 0.2f;
+//         multisampleCreateInfo_MSAAEnabled.pSampleMask = nullptr;
+//         multisampleCreateInfo_MSAAEnabled.alphaToCoverageEnable = VK_FALSE;
+//         multisampleCreateInfo_MSAAEnabled.alphaToOneEnable = VK_FALSE;
+// #endif
 
-////////////// Color Blending
-        // After a fragment shader has returned a color, it needs to be combined with the color that is already in the framebuffer.
-        // There are two ways of color blending:
-        //      1. Mix the old and new value to produce a final color.
-        //      2. Combine the old and new value using a bitwise operation.
+// ////////////// Color Blending
+//         // After a fragment shader has returned a color, it needs to be combined with the color that is already in the framebuffer.
+//         // There are two ways of color blending:
+//         //      1. Mix the old and new value to produce a final color.
+//         //      2. Combine the old and new value using a bitwise operation.
 
-        /*
-            VkPipelineColorBlendAttachmentState is per-framebuffer struct allows to configure the first way of color blending.
-            Psuedocode:
+//         /*
+//             VkPipelineColorBlendAttachmentState is per-framebuffer struct allows to configure the first way of color blending.
+//             Psuedocode:
 
-            if(blendEnable)
-            {
-                finalColor.rgb = (srcColorBlendFactor * newColor.rgb) <colorBlendOp> (dstColorBlendFactor * oldColor.rgb);
-                finalColor.a = (srcAlphaBlendFactor * newColor.a) <alphaBlendOp> (dstAlphaBlendFactor * oldColor.a);
-            }
-            else
-            {
-                finalColor = newColor;
-            }
+//             if(blendEnable)
+//             {
+//                 finalColor.rgb = (srcColorBlendFactor * newColor.rgb) <colorBlendOp> (dstColorBlendFactor * oldColor.rgb);
+//                 finalColor.a = (srcAlphaBlendFactor * newColor.a) <alphaBlendOp> (dstAlphaBlendFactor * oldColor.a);
+//             }
+//             else
+//             {
+//                 finalColor = newColor;
+//             }
 
-            finalColor = finalColor & colorWriteMask;
-        */
-        VkPipelineColorBlendAttachmentState colorBlendAttachmentState = VX_FRAMEWORK_NAMESPACE::initializers::pipelineColorBlendAttachmentState(VK_FALSE, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);    // Contains the configuration per attached framebuffer.
-        colorBlendAttachmentState.srcColorBlendFactor   = VK_BLEND_FACTOR_ONE;    // Optional
-        colorBlendAttachmentState.dstColorBlendFactor   = VK_BLEND_FACTOR_ZERO;   // Optional
-        colorBlendAttachmentState.colorBlendOp          = VK_BLEND_OP_ADD;        // Optional
-        colorBlendAttachmentState.srcAlphaBlendFactor   = VK_BLEND_FACTOR_ONE;    // Optional
-        colorBlendAttachmentState.dstAlphaBlendFactor   = VK_BLEND_FACTOR_ZERO;   // Optional
-        colorBlendAttachmentState.alphaBlendOp          = VK_BLEND_OP_ADD;        // Optional
+//             finalColor = finalColor & colorWriteMask;
+//         */
+//         VkPipelineColorBlendAttachmentState colorBlendAttachmentState = VX_FRAMEWORK_NAMESPACE::initializers::pipelineColorBlendAttachmentState(VK_FALSE, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);    // Contains the configuration per attached framebuffer.
+//         colorBlendAttachmentState.srcColorBlendFactor   = VK_BLEND_FACTOR_ONE;    // Optional
+//         colorBlendAttachmentState.dstColorBlendFactor   = VK_BLEND_FACTOR_ZERO;   // Optional
+//         colorBlendAttachmentState.colorBlendOp          = VK_BLEND_OP_ADD;        // Optional
+//         colorBlendAttachmentState.srcAlphaBlendFactor   = VK_BLEND_FACTOR_ONE;    // Optional
+//         colorBlendAttachmentState.dstAlphaBlendFactor   = VK_BLEND_FACTOR_ZERO;   // Optional
+//         colorBlendAttachmentState.alphaBlendOp          = VK_BLEND_OP_ADD;        // Optional
 
 
-        // The VkPipelineColorBlendStateCreateInfo() references the array of structures for all of the framebuffers and
-        // allows you to blend constants that you can use as blend factors in the aforementioned calculations.
-        //
-        // if you want to use the second method of blending (bitwise combination), then you should set 'logicOpEnable'
-        // to VK_TRUE.
-        // The bitwise operation can then be specified in the 'logicOp' field. Note that this will automatically disable
-        // the first method, as if you had set 'blendEnable' to VK_FALSE for every attached framebuffer!
-        VkPipelineColorBlendStateCreateInfo colorBlendingCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineColorBlendStateCreateInfo(1U, &colorBlendAttachmentState);
-        colorBlendingCreateInfo.logicOpEnable = VK_FALSE;
-        colorBlendingCreateInfo.logicOp = VK_LOGIC_OP_COPY; // Optional
-        colorBlendingCreateInfo.blendConstants[0] = 0.0f;   // Optional
-        colorBlendingCreateInfo.blendConstants[1] = 0.0f;   // Optional
-        colorBlendingCreateInfo.blendConstants[2] = 0.0f;   // Optional
-        colorBlendingCreateInfo.blendConstants[3] = 0.0f;   // Optional
+//         // The VkPipelineColorBlendStateCreateInfo() references the array of structures for all of the framebuffers and
+//         // allows you to blend constants that you can use as blend factors in the aforementioned calculations.
+//         //
+//         // if you want to use the second method of blending (bitwise combination), then you should set 'logicOpEnable'
+//         // to VK_TRUE.
+//         // The bitwise operation can then be specified in the 'logicOp' field. Note that this will automatically disable
+//         // the first method, as if you had set 'blendEnable' to VK_FALSE for every attached framebuffer!
+//         VkPipelineColorBlendStateCreateInfo colorBlendingCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineColorBlendStateCreateInfo(1U, &colorBlendAttachmentState);
+//         colorBlendingCreateInfo.logicOpEnable = VK_FALSE;
+//         colorBlendingCreateInfo.logicOp = VK_LOGIC_OP_COPY; // Optional
+//         colorBlendingCreateInfo.blendConstants[0] = 0.0f;   // Optional
+//         colorBlendingCreateInfo.blendConstants[1] = 0.0f;   // Optional
+//         colorBlendingCreateInfo.blendConstants[2] = 0.0f;   // Optional
+//         colorBlendingCreateInfo.blendConstants[3] = 0.0f;   // Optional
 
-////////////// Pipeline Layout
-        // The uniform values need to be specified during pipeline creation by creating VkPipelineLayout object.
-        VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineLayoutCreateInfo(1U, &graphicsPipeline.descriptorSetLayout, 0U, nullptr);
+// ////////////// Pipeline Layout
+//         // The uniform values need to be specified during pipeline creation by creating VkPipelineLayout object.
+//         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineLayoutCreateInfo(1U, &graphicsPipeline.descriptorSetLayout, 0U, nullptr);
 
-        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreatePipelineLayout(vulkanLogicalDevice, &pipelineLayoutCreateInfo, nullptr, &graphicsPipeline.pipelineLayout), false);
+//         VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreatePipelineLayout(vulkanLogicalDevice, &pipelineLayoutCreateInfo, nullptr, &graphicsPipeline.pipelineLayout), false);
 
-////////////// Create Graphics Pipeline
-        {
-            VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::graphicsPipelineCreateInfo(graphicsPipeline.pipelineLayout, vulkanRenderPass, 0U);     // Finally renference to the render pass and the index of the sub pass where this graphics pipeline will be used.
-            graphicsPipelineCreateInfo.stageCount           = 2;
-            graphicsPipelineCreateInfo.pStages              = shaderStages;
-            graphicsPipelineCreateInfo.pVertexInputState    = &vertexInputCreateInfo;
-            graphicsPipelineCreateInfo.pInputAssemblyState  = &inputAssemblyCreateInfo;
-            graphicsPipelineCreateInfo.pViewportState       = &viewportStateCreateInfo;
-            graphicsPipelineCreateInfo.pRasterizationState  = &rasterizerStateCreateInfo;
-            graphicsPipelineCreateInfo.pMultisampleState    = &multisampleCreateInfo;
-            graphicsPipelineCreateInfo.pDepthStencilState   = &depthStencilStateCreateInfo;
-            graphicsPipelineCreateInfo.pColorBlendState     = &colorBlendingCreateInfo;
-            graphicsPipelineCreateInfo.pDynamicState        = &dynamicStateCreateInfo;
+// ////////////// Create Graphics Pipeline
+//         {
+//             VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::graphicsPipelineCreateInfo(graphicsPipeline.pipelineLayout, vulkanRenderPass, 0U);     // Finally renference to the render pass and the index of the sub pass where this graphics pipeline will be used.
+//             graphicsPipelineCreateInfo.stageCount           = 2;
+//             graphicsPipelineCreateInfo.pStages              = shaderStages;
+//             graphicsPipelineCreateInfo.pVertexInputState    = &vertexInputCreateInfo;
+//             graphicsPipelineCreateInfo.pInputAssemblyState  = &inputAssemblyCreateInfo;
+//             graphicsPipelineCreateInfo.pViewportState       = &viewportStateCreateInfo;
+//             graphicsPipelineCreateInfo.pRasterizationState  = &rasterizerStateCreateInfo;
+//             graphicsPipelineCreateInfo.pMultisampleState    = &multisampleCreateInfo;
+//             graphicsPipelineCreateInfo.pDepthStencilState   = &depthStencilStateCreateInfo;
+//             graphicsPipelineCreateInfo.pColorBlendState     = &colorBlendingCreateInfo;
+//             graphicsPipelineCreateInfo.pDynamicState        = &dynamicStateCreateInfo;
 
-            VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateGraphicsPipelines( vulkanLogicalDevice, VK_NULL_HANDLE, 1, &graphicsPipelineCreateInfo, nullptr, &graphicsPipeline.pipeline), false);
-        }
+//             VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateGraphicsPipelines( vulkanLogicalDevice, VK_NULL_HANDLE, 1, &graphicsPipelineCreateInfo, nullptr, &graphicsPipeline.pipeline), false);
+//         }
 
-        {
-            VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::graphicsPipelineCreateInfo(graphicsPipeline.pipelineLayout, msaa.renderPass_MSAA, 0U);     // Finally renference to the render pass and the index of the sub pass where this graphics pipeline will be used.
-            graphicsPipelineCreateInfo.stageCount           = 2;
-            graphicsPipelineCreateInfo.pStages              = shaderStages;
-            graphicsPipelineCreateInfo.pVertexInputState    = &vertexInputCreateInfo;
-            graphicsPipelineCreateInfo.pInputAssemblyState  = &inputAssemblyCreateInfo;
-            graphicsPipelineCreateInfo.pViewportState       = &viewportStateCreateInfo;
-            graphicsPipelineCreateInfo.pRasterizationState  = &rasterizerStateCreateInfo;
-            graphicsPipelineCreateInfo.pMultisampleState    = &multisampleCreateInfo_MSAAEnabled;
-            graphicsPipelineCreateInfo.pDepthStencilState   = &depthStencilStateCreateInfo;
-            graphicsPipelineCreateInfo.pColorBlendState     = &colorBlendingCreateInfo;
-            graphicsPipelineCreateInfo.pDynamicState        = &dynamicStateCreateInfo;
+//         {
+//             VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::graphicsPipelineCreateInfo(graphicsPipeline.pipelineLayout, msaa.renderPass_MSAA, 0U);     // Finally renference to the render pass and the index of the sub pass where this graphics pipeline will be used.
+//             graphicsPipelineCreateInfo.stageCount           = 2;
+//             graphicsPipelineCreateInfo.pStages              = shaderStages;
+//             graphicsPipelineCreateInfo.pVertexInputState    = &vertexInputCreateInfo;
+//             graphicsPipelineCreateInfo.pInputAssemblyState  = &inputAssemblyCreateInfo;
+//             graphicsPipelineCreateInfo.pViewportState       = &viewportStateCreateInfo;
+//             graphicsPipelineCreateInfo.pRasterizationState  = &rasterizerStateCreateInfo;
+//             graphicsPipelineCreateInfo.pMultisampleState    = &multisampleCreateInfo_MSAAEnabled;
+//             graphicsPipelineCreateInfo.pDepthStencilState   = &depthStencilStateCreateInfo;
+//             graphicsPipelineCreateInfo.pColorBlendState     = &colorBlendingCreateInfo;
+//             graphicsPipelineCreateInfo.pDynamicState        = &dynamicStateCreateInfo;
 
-            VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateGraphicsPipelines( vulkanLogicalDevice, VK_NULL_HANDLE, 1, &graphicsPipelineCreateInfo, nullptr, &graphicsPipeline.pipeline_MSAA), false);
-        }
+//             VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateGraphicsPipelines( vulkanLogicalDevice, VK_NULL_HANDLE, 1, &graphicsPipelineCreateInfo, nullptr, &graphicsPipeline.pipeline_MSAA), false);
+//         }
 
-        // Destroy Shader Module
-        vkDestroyShaderModule( vulkanLogicalDevice, fragmentShaderModule, nullptr);
-        vkDestroyShaderModule( vulkanLogicalDevice, vertexShaderModule, nullptr);
+//         // Destroy Shader Module
+//         vkDestroyShaderModule( vulkanLogicalDevice, fragmentShaderModule, nullptr);
+//         vkDestroyShaderModule( vulkanLogicalDevice, vertexShaderModule, nullptr);
 
-        LogSuccess("Vulkan: [Success] Vulkan Graphics Pipeline Created.");
+//         LogSuccess("Vulkan: [Success] Vulkan Graphics Pipeline Created.");
 
-        return true;
-    }
-    // ============== Graphics Pipeline Initialization : End ==============
+//         return true;
+//     }
+//     // ============== Graphics Pipeline Initialization : End ==============
 
-    // ============== Compute Pipeline Initialization : Begin ==============
-    /**
-     * @brief CreateComputePipelineResources()
-    */
-    static bool CreateComputePipelineResources()
-    {
-        // code
-        // Create Uniform Buffers
-        if(!CreateUniformBuffer(sizeof(ComputePipelineUniformBufferObject), &computePipeline.uniformBuffer, 1U))
-        {
-            LogError("Failed to create uniform buffers for compute pipeline.");
-            return false;
-        }
+//     // ============== Compute Pipeline Initialization : Begin ==============
+//     /**
+//      * @brief CreateComputePipelineResources()
+//     */
+//     static bool CreateComputePipelineResources()
+//     {
+//         // code
+//         // Create Uniform Buffers
+//         if(!CreateUniformBuffer(sizeof(ComputePipelineUniformBufferObject), &computePipeline.uniformBuffer, 1U))
+//         {
+//             LogError("Failed to create uniform buffers for compute pipeline.");
+//             return false;
+//         }
 
-        // Descriptor Set Layouts
-        VkDescriptorSetLayoutBinding descLayoutBindings[] = {
-            VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutBinding(0U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1U),
-            VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutBinding(1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1U),
-            VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutBinding(2U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1U)
-        };
-        VkDescriptorSetLayoutCreateInfo descSetLayoutCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutCreateInfo( static_cast<uint32_t>(std::size(descLayoutBindings)), descLayoutBindings);
-        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateDescriptorSetLayout( vulkanLogicalDevice, &descSetLayoutCreateInfo, nullptr, &computePipeline.descriptorSetLayout), false);
+//         // Descriptor Set Layouts
+//         VkDescriptorSetLayoutBinding descLayoutBindings[] = {
+//             VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutBinding(0U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1U),
+//             VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutBinding(1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1U),
+//             VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutBinding(2U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 1U)
+//         };
+//         VkDescriptorSetLayoutCreateInfo descSetLayoutCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetLayoutCreateInfo( static_cast<uint32_t>(std::size(descLayoutBindings)), descLayoutBindings);
+//         VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreateDescriptorSetLayout( vulkanLogicalDevice, &descSetLayoutCreateInfo, nullptr, &computePipeline.descriptorSetLayout), false);
 
-        // Create Descriptor Sets
-        VkDescriptorSetLayout layouts[2];
-        for( int i = 0; i < 2; ++i)
-        {
-            layouts[i] = computePipeline.descriptorSetLayout;
-        }
+//         // Create Descriptor Sets
+//         VkDescriptorSetLayout layouts[2];
+//         for( int i = 0; i < 2; ++i)
+//         {
+//             layouts[i] = computePipeline.descriptorSetLayout;
+//         }
 
-        VkDescriptorSetAllocateInfo allocInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetAllocateInfo(vulkanDescriptorPool, 2U, layouts);
-        VK_UTIL_FN_ERROR_CHECK_RETURN( vkAllocateDescriptorSets(vulkanLogicalDevice, &allocInfo, computePipeline.descriptorSets), false);
+//         VkDescriptorSetAllocateInfo allocInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorSetAllocateInfo(vulkanDescriptorPool, 2U, layouts);
+//         VK_UTIL_FN_ERROR_CHECK_RETURN( vkAllocateDescriptorSets(vulkanLogicalDevice, &allocInfo, computePipeline.descriptorSets), false);
 
-        for( size_t i = 0; i < 2; ++i)
-        {
-            VkDescriptorBufferInfo readStorageBufferInfo  = VX_FRAMEWORK_NAMESPACE::initializers::descriptorBufferInfo(particleSSBOs[ i         ].handle, 0, VK_WHOLE_SIZE);
-            VkDescriptorBufferInfo writeStorageBufferInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorBufferInfo(particleSSBOs[(i + 1) % 2].handle, 0, VK_WHOLE_SIZE);
-            VkDescriptorBufferInfo uniformBufferInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorBufferInfo(computePipeline.uniformBuffer.handle, 0, sizeof(ComputePipelineUniformBufferObject));
+//         for( size_t i = 0; i < 2; ++i)
+//         {
+//             VkDescriptorBufferInfo readStorageBufferInfo  = VX_FRAMEWORK_NAMESPACE::initializers::descriptorBufferInfo(particleSSBOs[ i         ].handle, 0, VK_WHOLE_SIZE);
+//             VkDescriptorBufferInfo writeStorageBufferInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorBufferInfo(particleSSBOs[(i + 1) % 2].handle, 0, VK_WHOLE_SIZE);
+//             VkDescriptorBufferInfo uniformBufferInfo = VX_FRAMEWORK_NAMESPACE::initializers::descriptorBufferInfo(computePipeline.uniformBuffer.handle, 0, sizeof(ComputePipelineUniformBufferObject));
 
-            VkWriteDescriptorSet descriptorWrites[] = {
-                VX_FRAMEWORK_NAMESPACE::initializers::writeBufferDescriptorSet(computePipeline.descriptorSets[i], 0U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &readStorageBufferInfo, 1U),
-                VX_FRAMEWORK_NAMESPACE::initializers::writeBufferDescriptorSet(computePipeline.descriptorSets[i], 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &writeStorageBufferInfo, 1U),
-                VX_FRAMEWORK_NAMESPACE::initializers::writeBufferDescriptorSet(computePipeline.descriptorSets[i], 2U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &uniformBufferInfo, 1U)
-            };
+//             VkWriteDescriptorSet descriptorWrites[] = {
+//                 VX_FRAMEWORK_NAMESPACE::initializers::writeBufferDescriptorSet(computePipeline.descriptorSets[i], 0U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &readStorageBufferInfo, 1U),
+//                 VX_FRAMEWORK_NAMESPACE::initializers::writeBufferDescriptorSet(computePipeline.descriptorSets[i], 1U, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &writeStorageBufferInfo, 1U),
+//                 VX_FRAMEWORK_NAMESPACE::initializers::writeBufferDescriptorSet(computePipeline.descriptorSets[i], 2U, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &uniformBufferInfo, 1U)
+//             };
 
-            vkUpdateDescriptorSets(vulkanLogicalDevice, static_cast<uint32_t>(std::size(descriptorWrites)), descriptorWrites, 0, nullptr);
-        }
+//             vkUpdateDescriptorSets(vulkanLogicalDevice, static_cast<uint32_t>(std::size(descriptorWrites)), descriptorWrites, 0, nullptr);
+//         }
 
-        // Create Compute Sync Objects
-        VkSemaphoreCreateInfo semaphoreCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::semaphoreCreateInfo();
+//         // Create Compute Sync Objects
+//         VkSemaphoreCreateInfo semaphoreCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::semaphoreCreateInfo();
 
-        for( uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
-        {
-            VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateSemaphore(vulkanLogicalDevice, &semaphoreCreateInfo, nullptr, &computePipelineFinishedSemaphore[i]), false);
-        }
+//         for( uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+//         {
+//             VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateSemaphore(vulkanLogicalDevice, &semaphoreCreateInfo, nullptr, &computePipelineFinishedSemaphore[i]), false);
+//         }
 
-        // Create Compute Pipeline Layout
-        VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineLayoutCreateInfo(1U, &computePipeline.descriptorSetLayout, 0U, nullptr);
-        VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreatePipelineLayout(vulkanLogicalDevice, &pipelineLayoutCreateInfo, nullptr, &computePipeline.pipelineLayout), false);
+//         // Create Compute Pipeline Layout
+//         VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineLayoutCreateInfo(1U, &computePipeline.descriptorSetLayout, 0U, nullptr);
+//         VK_UTIL_FN_ERROR_CHECK_RETURN(vkCreatePipelineLayout(vulkanLogicalDevice, &pipelineLayoutCreateInfo, nullptr, &computePipeline.pipelineLayout), false);
 
-        // Create Compute Pipeline
-        VkShaderModule computeShaderModule = VX_FRAMEWORK_NAMESPACE::utils::CreateVkShaderModuleFromFile(vulkanLogicalDevice, "shaders/advect.comp.spv");
-        if(!computeShaderModule)
-        {
-            return false;
-        }
+//         // Create Compute Pipeline
+//         VkShaderModule computeShaderModule = VX_FRAMEWORK_NAMESPACE::utils::CreateVkShaderModuleFromFile(vulkanLogicalDevice, "shaders/advect.comp.spv");
+//         if(!computeShaderModule)
+//         {
+//             return false;
+//         }
 
-        VkPipelineShaderStageCreateInfo computeShaderStageInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT, computeShaderModule, "main");
-        VkComputePipelineCreateInfo computePipelineCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::computePipelineCreateInfo(computePipeline.pipelineLayout);
-        computePipelineCreateInfo.stage = computeShaderStageInfo;
-        VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateComputePipelines(vulkanLogicalDevice, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &computePipeline.pipeline), false);
+//         VkPipelineShaderStageCreateInfo computeShaderStageInfo = VX_FRAMEWORK_NAMESPACE::initializers::pipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT, computeShaderModule, "main");
+//         VkComputePipelineCreateInfo computePipelineCreateInfo = VX_FRAMEWORK_NAMESPACE::initializers::computePipelineCreateInfo(computePipeline.pipelineLayout);
+//         computePipelineCreateInfo.stage = computeShaderStageInfo;
+//         VK_UTIL_FN_ERROR_CHECK_RETURN( vkCreateComputePipelines(vulkanLogicalDevice, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &computePipeline.pipeline), false);
 
-        // Destroy Shader Module
-        vkDestroyShaderModule( vulkanLogicalDevice, computeShaderModule, nullptr);
-        LogSuccess("Vulkan: [Success] Vulkan Compute Pipeline Created.");
+//         // Destroy Shader Module
+//         vkDestroyShaderModule( vulkanLogicalDevice, computeShaderModule, nullptr);
+//         LogSuccess("Vulkan: [Success] Vulkan Compute Pipeline Created.");
 
-        return true;
-    }
-    // ============== Compute Pipeline Initialization : End ==============
+//         return true;
+//     }
+//     // ============== Compute Pipeline Initialization : End ==============
 
     float GetRandomValue()
     {
@@ -1457,10 +1386,10 @@ namespace VkApplication
         CHECK_FUNCTION_RETURN(CreateDepthResource());
 
         // Create Render Pass
-        CHECK_FUNCTION_RETURN(CreateVulkanRenderPass());
+        // CHECK_FUNCTION_RETURN(CreateVulkanRenderPass());
 
         // Create Swapchain Framebuffer
-        CHECK_FUNCTION_RETURN(CreateVulkanFramebuffersForSwapchain());
+        // CHECK_FUNCTION_RETURN(CreateVulkanFramebuffersForSwapchain());
 
         // MSAA Resources
         CHECK_FUNCTION_RETURN(InitializeMSAAResources());
@@ -1473,27 +1402,6 @@ namespace VkApplication
 
         // Create Sync Objects
         CHECK_FUNCTION_RETURN(CreateVulkanSyncObjects());
-
-
-        // Initialize Scene
-        std::vector<Particle> particles(MAX_PARTICLES);
-        for(Particle& particle : particles)
-        {
-            particle.Position = glm::vec4(GetRandomValueInRange(MIN_AABB, MAX_AABB), GetRandomValueInRange(MIN_AABB, MAX_AABB), GetRandomValueInRange(MIN_AABB, MAX_AABB), 1.0f);
-            particle.Velocity = glm::vec4(0.0f);
-            particle.Age = 0.0f;
-            particle.MaxAge = GetRandomValueInRange(5.0f, 10.0f);
-        }
-
-            // Create SSBOs
-        CHECK_FUNCTION_RETURN( CreateVulkanBuffer( sizeof(Particle) * MAX_PARTICLES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, particleSSBOs[0], particles.data(), sizeof(Particle) * MAX_PARTICLES));
-        CHECK_FUNCTION_RETURN( CreateVulkanBuffer( sizeof(Particle) * MAX_PARTICLES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, particleSSBOs[1], nullptr, 0U));
-
-            // Create Graphics Pipeline
-        CHECK_FUNCTION_RETURN(CreateGraphicsPipelineResources());
-
-            // Create Compute Pipeline
-        CHECK_FUNCTION_RETURN(CreateComputePipelineResources());
 
         return true;
 
@@ -1518,14 +1426,14 @@ namespace VkApplication
     {
         // code
             // Framebuffers
-        for(VkFramebuffer& framebuffer : swapChain.framebuffers)
-        {
-            if(framebuffer)
-            {
-                vkDestroyFramebuffer(vulkanLogicalDevice, framebuffer, nullptr);
-                framebuffer = nullptr;
-            }
-        }
+        // for(VkFramebuffer& framebuffer : swapChain.framebuffers)
+        // {
+        //     if(framebuffer)
+        //     {
+        //         vkDestroyFramebuffer(vulkanLogicalDevice, framebuffer, nullptr);
+        //         framebuffer = nullptr;
+        //     }
+        // }
 
             // Depth Resources
         swapChainDepthTexture.Destroy(vulkanLogicalDevice);
@@ -1581,7 +1489,7 @@ namespace VkApplication
 
         InitializeSwapChain();
         CreateDepthResource();
-        CreateVulkanFramebuffersForSwapchain();
+        // CreateVulkanFramebuffersForSwapchain();
 
         InitializeMSAAResources();
 
@@ -1602,29 +1510,6 @@ namespace VkApplication
         float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
         float deltaTime = (time - totalTime) * 0.01f;
         totalTime = time;
-
-        // Update Compute Uniform Buffer
-        ComputePipelineUniformBufferObject computeUbo{};
-        computeUbo.DeltaTime = deltaTime;
-        computeUbo.Time = totalTime;
-        computeUbo.MinAABB = MIN_AABB;
-        computeUbo.MaxAABB = MAX_AABB;
-
-        memcpy(computePipeline.uniformBuffer.mapped, &computeUbo, sizeof(computeUbo));
-
-        // Update Graphics Uniform Buffer
-        float cameraRotationAngle = glm::pi<float>() * 0.30f * time;
-
-        GraphicsPipelineUniformBufferObject graphicUbo{};
-        graphicUbo.ProjMatrix = glm::perspective(glm::radians(60.0f), swapChain.extent.width / (float)swapChain.extent.height, 0.1f, 100.0f);
-        //     // GLM was originally designed for OpenGL, where teh U coordinate of the clip coordinates is inverted. The easiest way to
-        //     // compendate for that is to flip the sign on the scaling factor of the Y axis in the projection matrix.
-        graphicUbo.ProjMatrix[1][1] *= -1;
-
-        glm::vec3 cameraPosition = glm::vec3(cameraDistance * sinf(cameraRotationAngle), cameraDistance * sinf(cameraRotationAngle * 0.75f), cameraDistance * cosf(cameraRotationAngle));
-        graphicUbo.ViewMatrix = glm::lookAt( cameraPosition, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-
-        memcpy(graphicsPipeline.uniformBuffer.mapped, &graphicUbo, sizeof(graphicUbo));
     }
 
     /**
@@ -1651,19 +1536,6 @@ namespace VkApplication
                 ImGui::Text("Present Mode: %s", VX_FRAMEWORK_NAMESPACE::helper::GetVkPresentModeString(swapChain.presentMode));
                 ImGui::Text("Image Count: %d", swapChain.images.size());
                 ImGui::Text("Image Extent: %d x %d", swapChain.extent.width, swapChain.extent.height);
-
-                ImGui::Separator();
-                if(ImGui::Checkbox("Enable MSAA (4x)", &msaa.requestedMSAA))
-                {
-                    if(msaa.requestedMSAA != msaa.useMSAA)
-                    {
-                        LogDebug("MSAA Checkbox Toggled: %s", msaa.useMSAA ? "Checked" : "Unchecked");
-                        reInitImGui = true;
-                    }
-                }
-
-                ImGui::Separator();
-                ImGui::DragFloat("Camera Distance", &cameraDistance, 0.1f, -100.0f, 100.0f);
             }
             ImGui::End();
         }
@@ -1682,59 +1554,6 @@ namespace VkApplication
             swapChain.framebufferResized = false;
             RecreateSwapChain();
             return;
-        }
-
-        if(reInitImGui)
-        {
-            vkDeviceWaitIdle(vulkanLogicalDevice);
-
-                // Shutdown ImGui Vulkan
-            ImGui_ImplVulkan_Shutdown();
-
-            // --- APPLY THE STATE HERE ---
-            // This ensures the rest of the frame (RenderPass selection, etc.) 
-            // perfectly matches the new ImGui initialization.
-            msaa.useMSAA = msaa.requestedMSAA;
-
-                // Initialize ImGui Vulkan
-            VkSurfaceCapabilitiesKHR surfaceCapabilities;
-            vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice.handle, vulkanSurface, &surfaceCapabilities);
-
-            ImGui_ImplVulkan_InitInfo initInfo{};
-            initInfo.ApiVersion             = vkInstanceVersion.PackedVersion;
-            initInfo.Instance               = vkInstance;
-            initInfo.PhysicalDevice         = physicalDevice.handle;
-            initInfo.Device                 = vulkanLogicalDevice;
-            initInfo.QueueFamily            = vulkanSelectedPhysicalDeviceQueueFamily.graphicsComputeFamily;
-            initInfo.Queue                  = vulkanGraphicsComputeQueue;
-            initInfo.DescriptorPool         = imgui_renderer.descriptorPool;
-            initInfo.MinImageCount          = surfaceCapabilities.minImageCount;
-            initInfo.ImageCount             = static_cast<uint32_t>(swapChain.images.size());
-            initInfo.PipelineCache          = VK_NULL_HANDLE;
-
-            initInfo.UseDynamicRendering    = VK_FALSE;   // We are using Render Passes, so this should be false.
-            
-            initInfo.PipelineInfoMain.RenderPass    = msaa.useMSAA ? msaa.renderPass_MSAA : vulkanRenderPass;
-            initInfo.PipelineInfoMain.Subpass       = 0;
-            initInfo.PipelineInfoMain.MSAASamples   =  msaa.useMSAA ? msaaSamplesCount : VK_SAMPLE_COUNT_1_BIT;
-
-            initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.sType                     = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-            initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.pNext                     = nullptr;
-            initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.viewMask                  = 0;
-            initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount      = 1;
-            initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats   = &swapChain.imageFormat;
-            initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.depthAttachmentFormat     = VK_FORMAT_UNDEFINED;
-            initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.stencilAttachmentFormat   = VK_FORMAT_UNDEFINED;
-
-            initInfo.Allocator = nullptr;
-            initInfo.CheckVkResultFn = __check_imgui_vk_result_callback_;
-
-            if(!ImGui_ImplVulkan_Init(&initInfo))
-            {
-                LogError("Failed to initialize ImGui Vulkan Backend.");
-            }
-
-            reInitImGui = false;
         }
 
             // Wait for the GPU to Finish
@@ -1756,10 +1575,7 @@ namespace VkApplication
 
         vkResetFences( vulkanLogicalDevice, 1, &inFlightFences[currentFrame]);
 
-        computePingPongIndex = frameNumber % 2;
-        graphicsPingPongIndex = (frameNumber + 1) % 2;
         // LogWarning("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< START NEW FRAME >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
-        // LogWarning("FrameNumber: %u, CurrentFrame: %u, ComputeIndex: %d, GraphicsIndex: %d", frameNumber, currentFrame, computePingPongIndex, graphicsPingPongIndex);
 
         // =====================================
         // Update Uniforms/UI
@@ -1777,37 +1593,17 @@ namespace VkApplication
         VK_UTIL_FN_ERROR_CHECK_RETURN(vkBeginCommandBuffer( cmdBuffer, &beginInfo), );
 
         // =====================================
-        // COMPUTE PASS
-        // =====================================
-        vkCmdBindPipeline( cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipeline);
-        vkCmdBindDescriptorSets( cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipelineLayout, 0, 1, &computePipeline.descriptorSets[computePingPongIndex], 0, nullptr);
-        vkCmdDispatch( cmdBuffer, MAX_PARTICLES, 1, 1);
-
-        // =====================================
-        // THE BARRIER
-        // =====================================
-        VkBufferMemoryBarrier bufferBarrier = VX_FRAMEWORK_NAMESPACE::initializers::bufferMemoryBarrier();
-        bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        bufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            // The barrier applies to the buffer we just WRITE to (the output buffer)
-        bufferBarrier.buffer = (computePingPongIndex == 0) ? particleSSBOs[1].handle : particleSSBOs[0].handle;
-        bufferBarrier.offset = 0;
-        bufferBarrier.size = VK_WHOLE_SIZE;
-
-        vkCmdPipelineBarrier( cmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
-
-        // =====================================
         // GRAPHICS PASS
         // =====================================
         VkClearValue clearValues[] = {
-            {0.0f, 0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f, 1.0f},
             {1.0f, 0U}
         };
 
             // Brgin Render Pass
         VkRenderPassBeginInfo renderPassInfo = VX_FRAMEWORK_NAMESPACE::initializers::renderPassBeginInfo();
-        renderPassInfo.renderPass        = msaa.useMSAA ? msaa.renderPass_MSAA : vulkanRenderPass;
-        renderPassInfo.framebuffer       = msaa.useMSAA ? msaa.framebuffers_MSAA[imageIndex] : swapChain.framebuffers[imageIndex];   // framebuffer for the swapchain image we want to draw to.
+        renderPassInfo.renderPass        = msaa.renderPass;
+        renderPassInfo.framebuffer       = msaa.framebuffers[imageIndex];
         renderPassInfo.renderArea.offset = { 0, 0};
         renderPassInfo.renderArea.extent = swapChain.extent;
         renderPassInfo.clearValueCount   = 2;
@@ -1821,11 +1617,6 @@ namespace VkApplication
 
             VkRect2D scissor = VX_FRAMEWORK_NAMESPACE::initializers::rect2D(0, 0, swapChain.extent.width, swapChain.extent.height);
             vkCmdSetScissor(cmdBuffer, 0, 1, &scissor);
-
-            vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, msaa.useMSAA ? graphicsPipeline.pipeline_MSAA : graphicsPipeline.pipeline);
-            vkCmdBindDescriptorSets( cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline.pipelineLayout, 0, 1, &graphicsPipeline.descriptorSets[graphicsPingPongIndex], 0, nullptr);
-
-            vkCmdDraw(cmdBuffer, MAX_PARTICLES, 1, 0, 0);
 
             // Render ImGui
             ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmdBuffer);
@@ -1846,15 +1637,15 @@ namespace VkApplication
         submitInfo.pCommandBuffers      = &cmdBuffer;
             
             // We must wait for the PREVIOUS frame's compute to finish if we are doing consecutive physics steps
-        VkSemaphore waitSemaphores[]      = { imageAvailableSemaphores[currentFrame], computePipelineFinishedSemaphore[(currentFrame + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT] };
-        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT};
-        submitInfo.waitSemaphoreCount   = (frameNumber == 0) ? 1 : 2;   // Don';'t wait on compute for the very first frame
+        VkSemaphore waitSemaphores[]      = { imageAvailableSemaphores[currentFrame]};
+        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        submitInfo.waitSemaphoreCount   = _ARRAYSIZE(waitSemaphores);
         submitInfo.pWaitSemaphores      = waitSemaphores;
         submitInfo.pWaitDstStageMask    = waitStages;
 
             // Signal that THIS frame's compute and rendering are done
-        VkSemaphore signalSemaphores[]  = { renderFinishedSemaphores[currentFrame], computePipelineFinishedSemaphore[currentFrame] };
-        submitInfo.signalSemaphoreCount = 2;
+        VkSemaphore signalSemaphores[]  = { renderFinishedSemaphores[currentFrame]};
+        submitInfo.signalSemaphoreCount = _ARRAYSIZE(signalSemaphores);
         submitInfo.pSignalSemaphores    = signalSemaphores;
 
         VK_UTIL_FN_ERROR_CHECK_RETURN( vkQueueSubmit( vulkanGraphicsComputeQueue, 1, &submitInfo, inFlightFences[currentFrame]), );
@@ -1890,7 +1681,6 @@ namespace VkApplication
         // =====================================
         // Advance to the next frame
         // =====================================
-        ++frameNumber;
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
@@ -1913,66 +1703,7 @@ namespace VkApplication
         CleanupSwapChain();
         InitializeMSAAResources(false);
 
-        // Destroy Graphics Pipeline
-        graphicsPipeline.uniformBuffer.Destroy(vulkanLogicalDevice);
-
-        if(graphicsPipeline.descriptorSetLayout)
-        {
-            vkDestroyDescriptorSetLayout(vulkanLogicalDevice, graphicsPipeline.descriptorSetLayout, nullptr);
-            graphicsPipeline.descriptorSetLayout = nullptr;    
-        }
-
-        if(graphicsPipeline.pipelineLayout)
-        {
-            vkDestroyPipelineLayout(vulkanLogicalDevice, graphicsPipeline.pipelineLayout, nullptr);
-            graphicsPipeline.pipelineLayout = nullptr;
-        }
-
-        if(graphicsPipeline.pipeline)
-        {
-            vkDestroyPipeline(vulkanLogicalDevice, graphicsPipeline.pipeline, nullptr);
-            graphicsPipeline.pipeline = nullptr;
-        }
-
-        if(graphicsPipeline.pipeline_MSAA)
-        {
-            vkDestroyPipeline(vulkanLogicalDevice, graphicsPipeline.pipeline_MSAA, nullptr);
-            graphicsPipeline.pipeline_MSAA = nullptr;
-        }
-
-        // Destroy Compute Pipeline
-        computePipeline.uniformBuffer.Destroy(vulkanLogicalDevice);
-
-        if(computePipeline.descriptorSetLayout)
-        {
-            vkDestroyDescriptorSetLayout(vulkanLogicalDevice, computePipeline.descriptorSetLayout, nullptr);
-            computePipeline.descriptorSetLayout = nullptr;    
-        }
-
-        if(computePipeline.pipelineLayout)
-        {
-            vkDestroyPipelineLayout(vulkanLogicalDevice, computePipeline.pipelineLayout, nullptr);
-            computePipeline.pipelineLayout = nullptr;
-        }
-
-        if(computePipeline.pipeline)
-        {
-            vkDestroyPipeline(vulkanLogicalDevice, computePipeline.pipeline, nullptr);
-            computePipeline.pipeline = nullptr;
-        }
-
-        if(computePipelineFinishedSemaphore[0])
-        {
-            vkDestroySemaphore(vulkanLogicalDevice, computePipelineFinishedSemaphore[0], nullptr);
-            computePipelineFinishedSemaphore[0] = nullptr;
-            vkDestroySemaphore(vulkanLogicalDevice, computePipelineFinishedSemaphore[1], nullptr);
-            computePipelineFinishedSemaphore[1] = nullptr;
-        }
-
         ////////////////////
-        particleSSBOs[0].Destroy(vulkanLogicalDevice);
-        particleSSBOs[1].Destroy(vulkanLogicalDevice);
-
         if(vulkanDescriptorPool)
         {
             vkDestroyDescriptorPool(vulkanLogicalDevice, vulkanDescriptorPool, nullptr);
@@ -2014,12 +1745,6 @@ namespace VkApplication
         {
             vkDestroyCommandPool(vulkanLogicalDevice, vulkanCommandPool, nullptr);
             vulkanCommandPool = nullptr;
-        }
-
-        if(vulkanRenderPass)
-        {
-            vkDestroyRenderPass( vulkanLogicalDevice, vulkanRenderPass, nullptr);
-            vulkanRenderPass = nullptr;
         }
 
         if(vulkanLogicalDevice)

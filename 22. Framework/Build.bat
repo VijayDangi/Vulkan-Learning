@@ -22,7 +22,7 @@ cl /EHsc ^
 del Main.obj ^
  VkApplication.obj ^
  vx_helpers.obj ^
- VkUtil.obj ^
+ vx_utils.obj ^
  imgui.obj ^
  imgui_draw.obj ^
  imgui_tables.obj ^
